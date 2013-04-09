@@ -69,6 +69,8 @@ typedef struct
 #define SECURITY_SERVER_MSG_TYPE_SET_PWD_VALIDITY_RESPONSE   0x1c
 #define SECURITY_SERVER_MSG_TYPE_SMACK_REQUEST		0x1d
 #define SECURITY_SERVER_MSG_TYPE_SMACK_RESPONSE	0x1e
+#define SECURITY_SERVER_MSG_TYPE_APP_GIVE_ACCESS_REQUEST 0x1f
+#define SECURITY_SERVER_MSG_TYPE_APP_GIVE_ACCESS_RESPONSE 0x20
 #define SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE	0xff
 
 /* Return code */
@@ -141,5 +143,12 @@ int send_set_pwd_max_challenge_request(int sock_fd, const unsigned int max_chall
 int send_chk_pwd_request(int sock_fd, const char*challenge);
 int check_socket_poll(int sockfd, int event, int timeout);
 int free_argv(char **argv, int argc);
+int send_valid_pwd_request(int sock_fd);
+int send_reset_pwd_request(int sock_fd,
+                           const char*new_pwd,
+                           const unsigned int max_challenge,
+                           const unsigned int valid_period_in_days);
+int send_set_pwd_history_request(int sock_fd, int num);
+int send_app_give_access(int sock_df, const char *customer_label, int customer_pid);
 
 #endif

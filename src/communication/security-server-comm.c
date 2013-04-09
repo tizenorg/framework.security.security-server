@@ -22,6 +22,7 @@
 #include <sys/poll.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/smack.h>
@@ -2394,8 +2395,6 @@ int get_client_gid_list(int sockfd, int ** privileges)
     //for read socket options
     struct ucred socopt;
     unsigned int socoptSize = sizeof(socopt);
-    //privileges to be returned
-    int privilegesSize;
     //buffer for store /proc/<PID>/status filepath
     const int PATHSIZE = 24;
     char path[PATHSIZE];
@@ -2436,8 +2435,7 @@ int get_client_gid_list(int sockfd, int ** privileges)
     //search for line beginning with "Groups:"
     while(strncmp(fileLine, "Groups:", 7) != 0)
     {
-        ret = fgets(fileLine, LINESIZE, fp);
-        if(ret == NULL)
+        if(NULL == fgets(fileLine, LINESIZE, fp))
         {
             SEC_SVR_DBG("%s", "Error on fgets");
             fclose(fp);
@@ -2553,5 +2551,61 @@ int free_argv(char **argv, int argc)
 	}
 	free(argv);
 	return SECURITY_SERVER_SUCCESS;
+}
+
+int send_app_give_access(int sock_fd, const char* customer_label, int customer_pid)
+{
+    basic_header hdr;
+    unsigned char *buff = NULL;
+    size_t total_len = 0;
+    size_t msg_len = 0;
+
+    msg_len = strlen(customer_label);
+    total_len = sizeof(hdr) + sizeof(int) + msg_len;
+
+    buff = malloc(total_len);
+    if (!buff) {
+        SEC_SVR_DBG("%s", "Error: failed on malloc()");
+        return SECURITY_SERVER_ERROR_OUT_OF_MEMORY;
+    }
+
+    hdr.version = SECURITY_SERVER_MSG_VERSION;
+    hdr.msg_id = SECURITY_SERVER_MSG_TYPE_APP_GIVE_ACCESS_REQUEST;
+    hdr.msg_len = (unsigned short)total_len;
+
+    memcpy(buff, &hdr, sizeof(hdr));
+    memcpy(buff + sizeof(hdr), &customer_pid, sizeof(int));
+    memcpy(buff + sizeof(hdr) + sizeof(int), customer_label, msg_len);
+
+    /* Check poll */
+    int retval = check_socket_poll(sock_fd, POLLOUT, SECURITY_SERVER_SOCKET_TIMEOUT_MILISECOND);
+    if(retval == SECURITY_SERVER_ERROR_POLL)
+    {
+        SEC_SVR_DBG("%s", "poll() error");
+        retval =  SECURITY_SERVER_ERROR_SEND_FAILED;
+        goto error;
+    }
+
+    if(retval == SECURITY_SERVER_ERROR_TIMEOUT)
+    {
+        SEC_SVR_DBG("%s", "poll() timeout");
+        retval =  SECURITY_SERVER_ERROR_SEND_FAILED;
+        goto error;
+    }
+
+    /* Send to server */
+    retval = TEMP_FAILURE_RETRY(write(sock_fd, buff, total_len));
+    if(retval != (int)total_len)
+    {
+        /* Write error */
+        SEC_SVR_DBG("Error on write(): %d", retval);
+        retval =  SECURITY_SERVER_ERROR_SEND_FAILED;
+        goto error;
+    }
+    retval = SECURITY_SERVER_SUCCESS;
+
+error:
+    free(buff);
+    return retval;
 }
 

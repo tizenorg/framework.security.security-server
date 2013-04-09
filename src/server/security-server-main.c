@@ -34,6 +34,12 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
+#include <poll.h>
+
+#include <privilege-control.h>
+
+#include <security-server-system-observer.h>
+#include <security-server-rules-revoker.h>
 
 #include "security-server-cookie.h"
 #include "security-server-common.h"
@@ -49,6 +55,10 @@ struct security_server_thread_param {
 	int server_sockfd;
 	int thread_status;
 };
+
+int process_app_get_access_request(int sockfd, size_t msg_len);
+static int netlink_enabled = 1; /* prevent memory leaks when netlink is disabled */
+
 
 /************************************************************************************************/
 /* Just for test. This code must be removed on release */
@@ -1144,6 +1154,10 @@ void *security_server_thread(void *param)
             process_set_pwd_validity_request(client_sockfd);
             break;
 
+        case SECURITY_SERVER_MSG_TYPE_APP_GIVE_ACCESS_REQUEST:
+            SEC_SVR_DBG("%s", "Server: app give access requset received");
+            process_app_get_access_request(client_sockfd, basic_hdr.msg_len - sizeof(basic_hdr));
+            break;
 /************************************************************************************************/
 /* Just for test. This code must be removed on release */
 		case SECURITY_SERVER_MSG_TYPE_GET_ALL_COOKIES_REQUEST:
@@ -1331,13 +1345,109 @@ error:
     pthread_exit(NULL);
 }
 
+ssize_t read_wrapper(int sockfd, void *buffer, size_t len) {
+    unsigned char *buff = (unsigned char *)buffer;
+    ssize_t done = 0;
+    while(done < (int)len) {
+        struct pollfd fds = { sockfd, POLLIN, 0};
+        if (0 >= poll(&fds, 1, 1000))
+            break;
+        ssize_t ret = read(sockfd, buff+done, len-done);
+        if (0 < ret) {
+            done += ret;
+            continue;
+        }
+        if (0 == ret)
+            break;
+        if (-1 == ret && EAGAIN != errno && EINTR != errno)
+            break;
+    }
+    return done;
+}
+
+int process_app_get_access_request(int sockfd, size_t msg_len)
+{
+    char *message_buffer = NULL;
+    char *client_label = NULL;
+    char *provider_label = NULL;
+    int ret = SECURITY_SERVER_ERROR_SERVER_ERROR;
+    int send_message_id = SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE;
+    int send_error_id = SECURITY_SERVER_RETURN_CODE_SERVER_ERROR;
+    int client_pid = 0;
+
+    message_buffer = malloc(msg_len+1);
+    if (!message_buffer)
+        return SECURITY_SERVER_ERROR_OUT_OF_MEMORY;
+    message_buffer[msg_len] = 0;
+
+    ssize_t retval = read_wrapper(sockfd, message_buffer, msg_len);
+
+    if (retval < (ssize_t)msg_len) {
+        SEC_SVR_DBG("%s", "Error in read. Message too short");
+        send_error_id = SECURITY_SERVER_RETURN_CODE_BAD_REQUEST;
+        ret = SECURITY_SERVER_ERROR_BAD_REQUEST;
+        goto error;
+    }
+
+    memcpy(&client_pid, message_buffer, sizeof(int));
+    client_label = message_buffer + sizeof(int);
+
+    if (0 != smack_new_label_from_socket(sockfd, &provider_label)) {
+        SEC_SVR_DBG("%s", "Error in smack_new_label_from_socket");
+        goto error;
+    }
+
+    if (PC_OPERATION_SUCCESS != app_give_access(client_label, provider_label, "rwxat")) {
+        SEC_SVR_DBG("%s", "Error in app_give_access");
+        goto error;
+    }
+
+    ret = SECURITY_SERVER_SUCCESS;
+    send_message_id = SECURITY_SERVER_MSG_TYPE_APP_GIVE_ACCESS_RESPONSE;
+    send_error_id = SECURITY_SERVER_RETURN_CODE_SUCCESS;
+
+    if (!netlink_enabled) {
+        SEC_SVR_DBG("Netlink not supported: Garbage collector inactive.");
+        goto error;
+    }
+
+    if (0 != rules_revoker_add(client_pid, client_label, provider_label))
+        SEC_SVR_DBG("%s", "Error in rules_revoker_add.");
+
+error:
+    retval = send_generic_response(sockfd, send_message_id, send_error_id);
+    if(retval != SECURITY_SERVER_SUCCESS)
+        SEC_SVR_DBG("Server ERROR: Cannot send response: %d", retval);
+
+    free(message_buffer);
+    free(provider_label);
+    return ret;
+}
+
+void *system_observer_main_thread(void *data) {
+    system_observer_main(data);
+    SEC_SVR_DBG("%s", "System observer: exit. No garbage collector support.");
+    netlink_enabled = 0;
+    pthread_detach(pthread_self());
+    pthread_exit(NULL);
+}
+
 int main(int argc, char* argv[])
 {
     int res;
     pthread_t main_thread;
+    pthread_t system_observer;
 
     (void)argc;
     (void)argv;
+
+    system_observer_config so_config;
+    so_config.event_callback = rules_revoker_callback;
+
+    res = pthread_create(&system_observer, NULL, system_observer_main_thread, (void*)&so_config);
+
+    if (res != 0)
+        return -1;
 
     res = pthread_create(&main_thread, NULL, security_server_main_thread, NULL);
     if (res == 0)

@@ -1580,3 +1580,4 @@ int process_set_pwd_validity_request(int sockfd)
 error:
     return retval;
 }
+

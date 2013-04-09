@@ -1012,6 +1012,13 @@ char * security_server_get_smacklabel_cookie(const char *cookie);
  */
 char * security_server_get_smacklabel_sockfd(int fd);
 
+/*
+ * This function will give permissions "rwxat" from
+ * (subject) customer_label to caller process (object).
+ * Object label will be extracted from socket.
+ * */
+int security_server_app_give_access(const char* customer_label, int customer_pid);
+
 #ifdef __cplusplus
 }
 #endif
