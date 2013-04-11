@@ -933,6 +933,98 @@ error:
 	return retval;
 }
 
+int process_pid_privilege_check(int sockfd, int datasize)
+{
+    //In this function we parsing received PID privilege check request
+    int retval;
+    int client_pid;
+    int pid;
+    char * object = NULL;
+    char * access_rights = NULL;
+    unsigned char return_code;
+    //file descriptor
+    int fd;
+    const int B_SIZE = 64;
+    char buff[B_SIZE];
+
+    //authenticate client
+    retval = authenticate_client_middleware(sockfd, &client_pid);
+
+    if (retval != SECURITY_SERVER_SUCCESS) {
+        SEC_SVR_DBG("%s", "Client Authentication Failed");
+        retval = send_generic_response(sockfd,
+            SECURITY_SERVER_MSG_TYPE_CHECK_PID_PRIVILEGE_RESPONSE,
+            SECURITY_SERVER_RETURN_CODE_AUTHENTICATION_FAILED);
+
+        if (retval != SECURITY_SERVER_SUCCESS)
+            SEC_SVR_DBG("ERROR: Cannot send generic response: %d", retval);
+
+        goto error;
+    }
+
+    //receive request
+    retval = recv_pid_privilege_request(sockfd, datasize, &pid, &object, &access_rights);
+
+    if (retval == SECURITY_SERVER_ERROR_RECV_FAILED) {
+        SEC_SVR_DBG("%s", "Receiving request failed");
+        retval = send_generic_response(sockfd,
+            SECURITY_SERVER_MSG_TYPE_CHECK_PID_PRIVILEGE_RESPONSE,
+            SECURITY_SERVER_RETURN_CODE_BAD_REQUEST);
+
+        if (retval != SECURITY_SERVER_SUCCESS)
+            SEC_SVR_DBG("ERROR: Cannot send generic response: %d", retval);
+
+        goto error;
+    }
+
+    //get SMACK label of process
+    bzero(buff, B_SIZE);
+    snprintf(buff, B_SIZE, "/proc/%d/attr/current", pid);
+
+    fd = open(buff, O_RDONLY, 0644);
+    if (fd < 0) {
+        SEC_SVR_DBG("%s", "Error open()");
+        retval = SECURITY_SERVER_ERROR_UNKNOWN;
+        goto error;
+    }
+
+    bzero(buff, B_SIZE);
+    retval = read(fd, buff, B_SIZE);
+    if (retval < 0) {
+        SEC_SVR_DBG("%s", "Error read()");
+        retval = SECURITY_SERVER_ERROR_UNKNOWN;
+        goto error;
+    }
+
+    //now we have SMACK label in buff and we call libsmack
+    SEC_SVR_DBG("Subject label of client PID %d is: %s\n", pid, buff);
+    retval = smack_have_access(buff, object, access_rights);
+    SEC_SVR_DBG("SMACK have access returned %d\n", retval);
+
+    if (retval == 1)   //there is permission
+        return_code = SECURITY_SERVER_RETURN_CODE_SUCCESS;
+    else                //there is no permission
+        return_code = SECURITY_SERVER_RETURN_CODE_ACCESS_DENIED;
+
+    //send response
+    retval = send_generic_response(sockfd,
+            SECURITY_SERVER_MSG_TYPE_CHECK_PID_PRIVILEGE_RESPONSE,
+            return_code);
+
+    if (retval != SECURITY_SERVER_SUCCESS)
+        SEC_SVR_DBG("ERROR: Cannot send generic response: %d", retval);
+
+error:
+    close(fd);
+
+    if (object != NULL)
+        free(object);
+    if (access_rights != NULL)
+        free(access_rights);
+
+    return retval; 
+}
+
 int process_tool_request(int client_sockfd, int server_sockfd)
 {
     int retval, argcnum = 0;
@@ -1112,6 +1204,12 @@ void *security_server_thread(void *param)
 		case SECURITY_SERVER_MSG_TYPE_SMACK_REQUEST:
 			SEC_SVR_DBG("%s", "SMACK label request received");
 			process_smack_request(client_sockfd);
+			break;
+
+        case SECURITY_SERVER_MSG_TYPE_CHECK_PID_PRIVILEGE_REQUEST:
+			SEC_SVR_DBG("%s", "PID privilege check request received");
+            //pass data size to function
+			process_pid_privilege_check(client_sockfd, basic_hdr.msg_len);
 			break;
 
 		case SECURITY_SERVER_MSG_TYPE_TOOL_REQUEST:

@@ -71,6 +71,8 @@ typedef struct
 #define SECURITY_SERVER_MSG_TYPE_SMACK_RESPONSE	0x1e
 #define SECURITY_SERVER_MSG_TYPE_APP_GIVE_ACCESS_REQUEST 0x1f
 #define SECURITY_SERVER_MSG_TYPE_APP_GIVE_ACCESS_RESPONSE 0x20
+#define SECURITY_SERVER_MSG_TYPE_CHECK_PID_PRIVILEGE_REQUEST    0x21
+#define SECURITY_SERVER_MSG_TYPE_CHECK_PID_PRIVILEGE_RESPONSE   0x22
 #define SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE	0xff
 
 /* Return code */
@@ -124,13 +126,19 @@ int recv_check_privilege_new_request(int sockfd,
                                      char *object_label,
                                      char *access_rights);
 int send_pid_request(int sock_fd, const char*cookie);
-int recv_pid_response(int sockfd, response_header *hdr, int *pid);
 int recv_pid_request(int sockfd, unsigned char *requested_cookie);
 int send_pid(int sockfd, int pid);
+int recv_pid_response(int sockfd, response_header *hdr, int *pid);
+
 int send_smack_request(int sockfd, const char * cookie);
-int recv_smack_response(int sockfd, response_header *hdr, char * label);
 int recv_smack_request(int sockfd, unsigned char *requested_cookie);
 int send_smack(int sockfd, char * label);
+int recv_smack_response(int sockfd, response_header *hdr, char * label);
+
+int send_pid_privilege_request(int sockfd, int pid, const char *object, const char *access_rights);
+int recv_pid_privilege_request(int sockfd, int datasize, int * pid, char ** object, char ** access_rights);
+int recv_pid_privilege_response(int sockfdi, response_header *hdr);
+
 int send_launch_tool_request(int sock_fd, int argc, const char **argv);
 int recv_generic_response(int sockfd, response_header *hdr);
 int recv_launch_tool_request(int sockfd, int argc, char *argv[]);

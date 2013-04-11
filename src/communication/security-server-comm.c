@@ -1184,6 +1184,91 @@ int send_smack_request(int sock_fd, const char * cookie)
 	return SECURITY_SERVER_SUCCESS;
 }
 
+//VERSION:      0x01
+//MSG_ID:       0x1f (SECURITY_SERVER_MSG_TYPE_CHECK_PID_PRIVILEGE_REQUEST)
+//DATA_SIZE:    strlen(object) + 1 + strlen(access_rights) + 1
+int send_pid_privilege_request(int sockfd, int pid, const char *object, const char *access_rights)
+{
+    //header structure
+    basic_header hdr;
+    int retval;
+    int message_size;
+    //buffer for data
+    char * buff = NULL;
+    int offset = 0;
+
+    if (pid < 0) {
+        SEC_SVR_DBG("%s", "Error input param");
+        return SECURITY_SERVER_ERROR_INPUT_PARAM;
+    }
+
+    if (object == NULL) {
+        SEC_SVR_DBG("%s", "Error input param");
+        return SECURITY_SERVER_ERROR_INPUT_PARAM;
+    }
+
+    //allocate buffer
+    //+1 for the '\0' at string end
+
+    message_size = sizeof(int) + strlen(object) + 1 + strlen(access_rights) + 1;
+    buff = (char *)malloc(message_size + sizeof(hdr));
+    if (buff == NULL) {
+        SEC_SVR_DBG("%s", "malloc() error");
+        return SECURITY_SERVER_ERROR_OUT_OF_MEMORY;
+    }
+
+    //clear buffer
+    bzero(buff, message_size + sizeof(hdr));
+
+    //create header
+    hdr.version = SECURITY_SERVER_MSG_VERSION;
+    //MSG_ID
+    hdr.msg_id = SECURITY_SERVER_MSG_TYPE_CHECK_PID_PRIVILEGE_REQUEST;
+    //set message size without header (data size)
+    hdr.msg_len = message_size;
+
+    //copy message fields to buffer
+    offset = 0;
+    memcpy(&buff[offset], &hdr, sizeof(hdr));
+    offset += sizeof(hdr);
+    //add PID
+    memcpy(&buff[offset], &pid, sizeof(pid));
+    offset += sizeof(pid);
+    //add *object with NULL at the end
+    memcpy(&buff[offset], object, strlen(object));
+    offset += strlen(object);
+    buff[offset] = 0;
+    offset += 1;
+    //add *access_rights with NULL at the end
+    memcpy(&buff[offset], access_rights, strlen(access_rights));
+    offset += strlen(access_rights);
+    buff[offset] = 0;
+
+    //check pool
+    retval = check_socket_poll(sockfd, POLLOUT, SECURITY_SERVER_SOCKET_TIMEOUT_MILISECOND);
+    if (retval == SECURITY_SERVER_ERROR_POLL) {
+        SEC_SVR_DBG("%s", "poll() error");
+        return SECURITY_SERVER_ERROR_SEND_FAILED;
+    }
+    if (retval == SECURITY_SERVER_ERROR_TIMEOUT) {
+        SEC_SVR_DBG("%s", "poll() timeout");
+        return SECURITY_SERVER_ERROR_SEND_FAILED;
+    }
+
+    //send message
+    retval = TEMP_FAILURE_RETRY(write(sockfd, buff, message_size + sizeof(hdr)));
+    if (retval < message_size) {
+        //error on write
+        SEC_SVR_DBG("Error on write(): %d", retval);
+        return SECURITY_SERVER_ERROR_SEND_FAILED;
+    }
+
+    if (buff != NULL)
+        free(buff);
+
+    return SECURITY_SERVER_SUCCESS;
+}
+
 /* Send PID check request message to security server *
  *
  * Message format
@@ -1981,6 +2066,61 @@ int recv_smack_request(int sockfd, unsigned char *requested_cookie)
 	return SECURITY_SERVER_SUCCESS;
 }
 
+int recv_pid_privilege_request(int sockfd, int datasize, int * pid, char ** object, char ** access_rights)
+{
+    int retval;
+    char * buff = NULL;
+    int object_size = 0;
+    int access_rights_size = 0;
+
+    buff = (char *)malloc(datasize);
+    if (buff == NULL)
+        return SECURITY_SERVER_ERROR_OUT_OF_MEMORY;
+
+    //receive all data to buffer
+    retval = TEMP_FAILURE_RETRY(read(sockfd, buff, datasize));
+	if (retval < datasize) {
+		SEC_SVR_DBG("Received data size is too small: %d / %d", retval, datasize);
+		retval =  SECURITY_SERVER_ERROR_RECV_FAILED;
+        goto error;
+	}
+
+    //getPID
+    memcpy(pid, buff, sizeof(int));
+
+    //get object
+    while (buff[sizeof(int) + object_size] != '\0') {
+        object_size++;
+
+        if (object_size > datasize) {
+            SEC_SVR_DBG("%s", "Wrong object_size");
+            retval = SECURITY_SERVER_ERROR_UNKNOWN;
+            goto error;
+        }
+    }
+    object_size++; //for '\0' at end
+
+    *object = (char *)malloc(object_size);
+    memcpy(*object, buff + sizeof(int), object_size);
+
+    //get access_rights
+    access_rights_size = datasize - sizeof(int) - object_size;
+    *access_rights = (char *)malloc(access_rights_size);
+    memcpy(*access_rights, buff + sizeof(int) + object_size, access_rights_size);
+
+    SEC_SVR_DBG("%s %d", "Received PID:", *pid);
+    SEC_SVR_DBG("%s %s", "Received object:", *object);
+    SEC_SVR_DBG("%s %s", "Received privileges:", *access_rights);
+
+    retval = SECURITY_SERVER_SUCCESS;
+
+error:
+    if (buff != NULL)
+        free(buff);
+
+	return retval;
+}
+
 /* Receive pid request packet body */
 /* Table argv and content will be freed by function caller */
 int recv_launch_tool_request(int sockfd, int argc, char *argv[])
@@ -2210,6 +2350,18 @@ int recv_smack_response(int sockfd, response_header *hdr, char * label)
 		return  SECURITY_SERVER_ERROR_RECV_FAILED;
 	}
 	return SECURITY_SERVER_SUCCESS;
+}
+
+int recv_pid_privilege_response(int sockfd, response_header *hdr)
+{
+    int retval;
+
+    retval = recv_generic_response(sockfd, hdr);
+
+    if (retval != SECURITY_SERVER_SUCCESS)
+        return return_code_to_error_code(hdr->return_code);
+
+    return SECURITY_SERVER_SUCCESS;
 }
 
 int recv_pid_response(int sockfd, response_header *hdr, int *pid)
