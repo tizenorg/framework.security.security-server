@@ -997,9 +997,10 @@ int process_pid_privilege_check(int sockfd, int datasize)
     }
 
     //now we have SMACK label in buff and we call libsmack
-    SEC_SVR_DBG("Subject label of client PID %d is: %s\n", pid, buff);
+    SEC_SVR_DBG("Subject label of client PID %d is: %s", pid, buff);
     retval = smack_have_access(buff, object, access_rights);
-    SEC_SVR_DBG("SMACK have access returned %d\n", retval);
+    SEC_SVR_DBG("SMACK have access returned %d", retval);
+    SEC_SVR_DBG("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=%s, result=%d", pid, buff, object, access_rights, retval);
 
     if (retval == 1)   //there is permission
         return_code = SECURITY_SERVER_RETURN_CODE_SUCCESS;
