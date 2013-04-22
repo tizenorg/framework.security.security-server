@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <sys/smack.h>
 #include <errno.h>
 #include <signal.h>
 #include <pthread.h>
@@ -37,7 +38,6 @@
 #include <poll.h>
 
 #include <privilege-control.h>
-
 #include <security-server-system-observer.h>
 #include <security-server-rules-revoker.h>
 
@@ -45,6 +45,8 @@
 #include "security-server-common.h"
 #include "security-server-password.h"
 #include "security-server-comm.h"
+
+const char * const LABEL_SECURITY_SERVER_API_DATA_SHARE = "security-server::api-data-share";
 
 /* Set cookie as a global variable */
 cookie_list *c_list;
@@ -1131,6 +1133,20 @@ error:
     return retval;
 }
 
+int client_has_access(int sockfd, const char *object) {
+    char *label = NULL;
+    int ret = 0;
+
+    if(smack_new_label_from_socket(sockfd, &label))
+        return 0;
+
+    if (0 >= (ret = smack_have_access(label, object, "rw")))
+        ret = 0;
+
+    free(label);
+    return ret;
+}
+
 void *security_server_thread(void *param)
 {
 	int client_sockfd = -1, client_uid, client_pid;
@@ -1255,8 +1271,16 @@ void *security_server_thread(void *param)
             break;
 
         case SECURITY_SERVER_MSG_TYPE_APP_GIVE_ACCESS_REQUEST:
-            SEC_SVR_DBG("%s", "Server: app give access requset received");
-            process_app_get_access_request(client_sockfd, basic_hdr.msg_len - sizeof(basic_hdr));
+            if (client_has_access(client_sockfd, LABEL_SECURITY_SERVER_API_DATA_SHARE)) {
+                SEC_SVR_DBG("%s", "Server: app give access request received");
+                process_app_get_access_request(client_sockfd,
+                    basic_hdr.msg_len - sizeof(basic_hdr));
+            } else {
+                SEC_SVR_DBG("%s", "Server: app give access request received (API DENIED - request will not proceed)");
+                send_generic_response(client_sockfd,
+                    SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE,
+                    SECURITY_SERVER_RETURN_CODE_ACCESS_DENIED);
+            }
             break;
 /************************************************************************************************/
 /* Just for test. This code must be removed on release */
