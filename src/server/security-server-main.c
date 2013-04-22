@@ -943,7 +943,7 @@ int process_pid_privilege_check(int sockfd, int datasize)
     char * access_rights = NULL;
     unsigned char return_code;
     //file descriptor
-    int fd;
+    int fd = -1;
     const int B_SIZE = 64;
     char buff[B_SIZE];
 
@@ -1016,7 +1016,8 @@ int process_pid_privilege_check(int sockfd, int datasize)
         SEC_SVR_DBG("ERROR: Cannot send generic response: %d", retval);
 
 error:
-    close(fd);
+    if (fd >= 0)
+        close(fd);
 
     if (object != NULL)
         free(object);
