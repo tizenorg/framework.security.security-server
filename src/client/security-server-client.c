@@ -461,8 +461,9 @@ int security_server_check_privilege_by_sockfd(int sockfd,
         return SECURITY_SERVER_API_ERROR_SERVER_ERROR;
     }
     ret = smack_have_access(subject, object, access_rights);
-    SEC_SVR_DBG("check by sockfd, subject >%s< object >%s< rights >%s< ====> %d",
-                subject, object, access_rights, ret);
+    SEC_SVR_DBG("SMACK have access returned %d", ret);
+    SEC_SVR_DBG("SS_SMACK: subject=%s, object=%s, access=%s, result=%d", subject, object, access_rights, ret);
+
     free(subject);
     if (ret == 1)
     {
