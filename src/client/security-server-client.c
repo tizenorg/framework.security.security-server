@@ -453,6 +453,12 @@ int security_server_check_privilege_by_sockfd(int sockfd,
                                               const char *object,
                                               const char *access_rights)
 {
+    if (!smack_check())
+    {
+        SEC_SVR_DBG("%s","No SMACK support on device");
+        return SECURITY_SERVER_API_SUCCESS;
+    }
+
     char *subject;
     int ret;
     ret = smack_new_label_from_socket(sockfd, &subject);
@@ -1100,11 +1106,19 @@ char * security_server_get_smacklabel_sockfd(int fd)
 {
 	char * label = NULL;
 
-	if(smack_new_label_from_socket(fd, &label) != 0)
-	{
-		SEC_SVR_DBG("Client ERROR: Unable to get socket SMACK label");
-		return NULL;
-	}
+    if (!smack_check())
+    {
+        SEC_SVR_DBG("%s","No SMACK support on device");
+        label = (char*) malloc(1);
+        if (label) label[0] = '\0';
+        return label;
+    }
+
+    if (smack_new_label_from_socket(fd, &label) != 0)
+    {
+        SEC_SVR_DBG("Client ERROR: Unable to get socket SMACK label");
+        return NULL;
+    }
 
 	return label;
 }

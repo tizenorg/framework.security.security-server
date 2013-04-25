@@ -28,4 +28,11 @@
 
 int smack_runtime_check(void);
 
+/*
+ * A very simple runtime check for SMACK on the platform
+ * Returns 1 if SMACK is present, 0 otherwise. If SMACK_ENABLED is not defined
+ * It returns 0.
+ */
+int smack_check(void);
+
 #endif // _SMACK_CHECK_H_

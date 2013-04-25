@@ -304,7 +304,7 @@ cookie_list *search_cookie_new(const cookie_list *c_list,
         if(memcmp(current->cookie, cookie, SECURITY_SERVER_COOKIE_LEN) == 0)
         {
             SEC_SVR_DBG("%s", "cookie has been found");
-            if (smack_runtime_check())
+            if (smack_check())
             {
                 ret = smack_have_access(current->smack_label, object, access_rights);
                 SEC_SVR_DBG("SMACK have access returned %d", ret);
@@ -512,15 +512,18 @@ out_of_while:
 		goto error;
 	}
 
-        /* Check SMACK label */
+    /* Check SMACK label */
+    if (smack_check())
+    {
         ret = smack_new_label_from_socket(sockfd, &smack_label);
         if (ret != 0)
-	{
-		SEC_SVR_DBG("Error checking peer label: %d", ret);
-		free(added);
-		added = NULL;
-		goto error;
-	}
+		{
+			SEC_SVR_DBG("Error checking peer label: %d", ret);
+			free(added);
+			added = NULL;
+			goto error;
+		}
+    }
 
 	added->path_len = strlen(exe);
 	added->path = calloc(1, strlen(exe));

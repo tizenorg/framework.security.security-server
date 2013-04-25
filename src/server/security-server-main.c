@@ -979,29 +979,35 @@ int process_pid_privilege_check(int sockfd, int datasize)
         goto error;
     }
 
-    //get SMACK label of process
     bzero(buff, B_SIZE);
-    snprintf(buff, B_SIZE, "/proc/%d/attr/current", pid);
+    if (smack_check()) {
+        //get SMACK label of process
+        snprintf(buff, B_SIZE, "/proc/%d/attr/current", pid);
 
-    fd = open(buff, O_RDONLY, 0644);
-    if (fd < 0) {
-        SEC_SVR_DBG("%s", "Error open()");
-        retval = SECURITY_SERVER_ERROR_UNKNOWN;
-        goto error;
+        fd = open(buff, O_RDONLY, 0644);
+        if (fd < 0) {
+            SEC_SVR_DBG("%s", "Error open()");
+            retval = SECURITY_SERVER_ERROR_UNKNOWN;
+            goto error;
+        }
+
+        bzero(buff, B_SIZE);
+        retval = read(fd, buff, B_SIZE);
+        if (retval < 0) {
+            SEC_SVR_DBG("%s", "Error read()");
+            retval = SECURITY_SERVER_ERROR_UNKNOWN;
+            goto error;
+        }
+
+        //now we have SMACK label in buff and we call libsmack
+        SEC_SVR_DBG("Subject label of client PID %d is: %s", pid, buff);
+        retval = smack_have_access(buff, object, access_rights);
+        SEC_SVR_DBG("SMACK have access returned %d", retval);
+    } else {
+        SEC_SVR_DBG("SMACK is not available. Subject label has not been read.");
+        retval = 1;
     }
 
-    bzero(buff, B_SIZE);
-    retval = read(fd, buff, B_SIZE);
-    if (retval < 0) {
-        SEC_SVR_DBG("%s", "Error read()");
-        retval = SECURITY_SERVER_ERROR_UNKNOWN;
-        goto error;
-    }
-
-    //now we have SMACK label in buff and we call libsmack
-    SEC_SVR_DBG("Subject label of client PID %d is: %s", pid, buff);
-    retval = smack_have_access(buff, object, access_rights);
-    SEC_SVR_DBG("SMACK have access returned %d", retval);
     SEC_SVR_DBG("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=%s, result=%d", pid, buff, object, access_rights, retval);
 
     if (retval == 1)   //there is permission
@@ -1137,12 +1143,15 @@ int client_has_access(int sockfd, const char *object) {
     char *label = NULL;
     int ret = 0;
 
-    if(smack_new_label_from_socket(sockfd, &label))
-        return 0;
+    if (smack_check())
+    {
 
-    if (0 >= (ret = smack_have_access(label, object, "rw")))
-        ret = 0;
+        if(smack_new_label_from_socket(sockfd, &label))
+            return 0;
 
+        if (0 >= (ret = smack_have_access(label, object, "rw")))
+            ret = 0;
+    }
     free(label);
     return ret;
 }
@@ -1516,14 +1525,16 @@ int process_app_get_access_request(int sockfd, size_t msg_len)
     memcpy(&client_pid, message_buffer, sizeof(int));
     client_label = message_buffer + sizeof(int);
 
-    if (0 != smack_new_label_from_socket(sockfd, &provider_label)) {
-        SEC_SVR_DBG("%s", "Error in smack_new_label_from_socket");
-        goto error;
-    }
+    if (smack_check()) {
+        if (0 != smack_new_label_from_socket(sockfd, &provider_label)) {
+            SEC_SVR_DBG("%s", "Error in smack_new_label_from_socket");
+            goto error;
+        }
 
-    if (PC_OPERATION_SUCCESS != app_give_access(client_label, provider_label, "rwxat")) {
-        SEC_SVR_DBG("%s", "Error in app_give_access");
-        goto error;
+        if (PC_OPERATION_SUCCESS != app_give_access(client_label, provider_label, "rwxat")) {
+            SEC_SVR_DBG("%s", "Error in app_give_access");
+            goto error;
+        }
     }
 
     ret = SECURITY_SERVER_SUCCESS;
@@ -1535,8 +1546,10 @@ int process_app_get_access_request(int sockfd, size_t msg_len)
         goto error;
     }
 
-    if (0 != rules_revoker_add(client_pid, client_label, provider_label))
-        SEC_SVR_DBG("%s", "Error in rules_revoker_add.");
+    if (smack_check()) {
+        if (0 != rules_revoker_add(client_pid, client_label, provider_label))
+            SEC_SVR_DBG("%s", "Error in rules_revoker_add.");
+    }
 
 error:
     retval = send_generic_response(sockfd, send_message_id, send_error_id);
@@ -1560,18 +1573,24 @@ int main(int argc, char* argv[])
 {
     int res;
     pthread_t main_thread;
-    pthread_t system_observer;
 
     (void)argc;
     (void)argv;
 
-    system_observer_config so_config;
-    so_config.event_callback = rules_revoker_callback;
+    // create observer thread only if smack is enabled
+    if (smack_check()) {
+        pthread_t system_observer;
+        system_observer_config so_config;
+        so_config.event_callback = rules_revoker_callback;
 
-    res = pthread_create(&system_observer, NULL, system_observer_main_thread, (void*)&so_config);
+        res = pthread_create(&system_observer, NULL, system_observer_main_thread, (void*)&so_config);
 
-    if (res != 0)
-        return -1;
+        if (res != 0)
+            return -1;
+    }
+    else {
+        SEC_SVR_DBG("SMACK is not available. Observer thread disabled.");
+    }
 
     res = pthread_create(&main_thread, NULL, security_server_main_thread, NULL);
     if (res == 0)

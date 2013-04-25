@@ -229,26 +229,32 @@ int create_new_socket(int *sockfd)
 		goto error;
 	}
 
-	if(smack_fsetlabel(localsockfd, "@", SMACK_LABEL_IPOUT) != 0)
-	{
-		SEC_SVR_DBG("%s", "SMACK labeling failed");
-		if(errno != EOPNOTSUPP)
+	// If SMACK is present we have to label our sockets regardless of SMACK_ENABLED flag
+	if (smack_runtime_check()) {
+		if(smack_fsetlabel(localsockfd, "@", SMACK_LABEL_IPOUT) != 0)
 		{
-			retval = SECURITY_SERVER_ERROR_SOCKET;
-            close(localsockfd);
-			localsockfd = -1;
-			goto error;
+			SEC_SVR_DBG("%s", "SMACK labeling failed");
+			if(errno != EOPNOTSUPP)
+			{
+				retval = SECURITY_SERVER_ERROR_SOCKET;
+				close(localsockfd);
+				localsockfd = -1;
+				goto error;
+			}
+		}
+		if(smack_fsetlabel(localsockfd, "*", SMACK_LABEL_IPIN) != 0)
+		{	SEC_SVR_DBG("%s", "SMACK labeling failed");
+			if(errno != EOPNOTSUPP)
+			{
+				retval = SECURITY_SERVER_ERROR_SOCKET;
+				close(localsockfd);
+				localsockfd = -1;
+				goto error;
+			}
 		}
 	}
-	if(smack_fsetlabel(localsockfd, "*", SMACK_LABEL_IPIN) != 0)
-	{	SEC_SVR_DBG("%s", "SMACK labeling failed");
-		if(errno != EOPNOTSUPP)
-		{
-			retval = SECURITY_SERVER_ERROR_SOCKET;
-            close(localsockfd);
-			localsockfd = -1;
-			goto error;
-		}
+	else {
+		SEC_SVR_DBG("SMACK is not available. Sockets won't be labeled.");
 	}
 
 	/* Make socket as non blocking */
