@@ -396,7 +396,7 @@ int security_server_check_privilege_by_cookie(const char *cookie,
         olen = strlen(object);
         alen = strlen(access_rights);
 
-        if (olen > MAX_OBJECT_LABEL_LEN || alen > MAX_MODE_STR_LEN)
+        if (olen > SMACK_LABEL_LEN || alen > MAX_MODE_STR_LEN)
 	{
 		retval = SECURITY_SERVER_ERROR_INPUT_PARAM;
 		goto error;
