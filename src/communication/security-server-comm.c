@@ -1199,12 +1199,14 @@ int send_pid_privilege_request(int sockfd, int pid, const char *object, const ch
 
     if (pid < 0) {
         SEC_SVR_DBG("%s", "Error input param");
-        return SECURITY_SERVER_ERROR_INPUT_PARAM;
+        retval = SECURITY_SERVER_ERROR_INPUT_PARAM;
+        goto error;
     }
 
     if (object == NULL) {
         SEC_SVR_DBG("%s", "Error input param");
-        return SECURITY_SERVER_ERROR_INPUT_PARAM;
+        retval = SECURITY_SERVER_ERROR_INPUT_PARAM;
+        goto error;
     }
 
     //allocate buffer
@@ -1214,7 +1216,8 @@ int send_pid_privilege_request(int sockfd, int pid, const char *object, const ch
     buff = (char *)malloc(message_size + sizeof(hdr));
     if (buff == NULL) {
         SEC_SVR_DBG("%s", "malloc() error");
-        return SECURITY_SERVER_ERROR_OUT_OF_MEMORY;
+        retval = SECURITY_SERVER_ERROR_OUT_OF_MEMORY;
+        goto error;
     }
 
     //clear buffer
@@ -1248,11 +1251,14 @@ int send_pid_privilege_request(int sockfd, int pid, const char *object, const ch
     retval = check_socket_poll(sockfd, POLLOUT, SECURITY_SERVER_SOCKET_TIMEOUT_MILISECOND);
     if (retval == SECURITY_SERVER_ERROR_POLL) {
         SEC_SVR_DBG("%s", "poll() error");
-        return SECURITY_SERVER_ERROR_SEND_FAILED;
+        retval = SECURITY_SERVER_ERROR_SEND_FAILED;
+        goto error;
+
     }
     if (retval == SECURITY_SERVER_ERROR_TIMEOUT) {
         SEC_SVR_DBG("%s", "poll() timeout");
-        return SECURITY_SERVER_ERROR_SEND_FAILED;
+        retval = SECURITY_SERVER_ERROR_SEND_FAILED;
+        goto error;
     }
 
     //send message
@@ -1260,13 +1266,15 @@ int send_pid_privilege_request(int sockfd, int pid, const char *object, const ch
     if (retval < message_size) {
         //error on write
         SEC_SVR_DBG("Error on write(): %d", retval);
-        return SECURITY_SERVER_ERROR_SEND_FAILED;
+        retval = SECURITY_SERVER_ERROR_SEND_FAILED;
+        goto error;
     }
-
+    retval = SECURITY_SERVER_SUCCESS;
+error:
     if (buff != NULL)
         free(buff);
 
-    return SECURITY_SERVER_SUCCESS;
+    return retval;
 }
 
 /* Send PID check request message to security server *
