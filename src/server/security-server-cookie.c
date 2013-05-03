@@ -289,34 +289,39 @@ cookie_list *search_cookie_new(const cookie_list *c_list,
                                const char *object,
                                const char *access_rights)
 {
-	cookie_list *current = (cookie_list *)c_list, *retval = NULL;
-        int ret;
-	int i;
+    cookie_list *current = (cookie_list *)c_list, *retval = NULL;
+    int ret;
 
-	/* Search from the list */
-	while(current != NULL)
-	{
-		/* print_cookie(current);*/
-		/* PID must be same */
-		current = garbage_collection(current);
-		if(current == NULL)
-			break;
+    /* Search from the list */
+    while(current != NULL)
+    {
+        /* print_cookie(current);*/
+        /* PID must be same */
+        current = garbage_collection(current);
+        if(current == NULL)
+            break;
 
-		if(memcmp(current->cookie, cookie, SECURITY_SERVER_COOKIE_LEN) == 0)
-		{
-			SEC_SVR_DBG("%s", "cookie has been found");
+        if(memcmp(current->cookie, cookie, SECURITY_SERVER_COOKIE_LEN) == 0)
+        {
+            SEC_SVR_DBG("%s", "cookie has been found");
+            if (smack_check())
+            {
+                ret = smack_have_access(current->smack_label, object, access_rights);
+                SEC_SVR_DBG("SMACK have access returned %d", ret);
+                SEC_SVR_DBG("SS_SMACK: subject=%s, object=%s, access=%s, result=%d", current->smack_label, object, access_rights, ret);
 
-                                ret = smack_have_access(current->smack_label, object, access_rights);
-          SEC_SVR_DBG("smack_have_access, subject >%s< object >%s< access >%s< ===> %d",
-                    current->smack_label, object, access_rights, ret);
-                                if (ret == 1)
-                                {
-                                        retval = current;
-                                        goto finish;
-                                }
-		}
-		current = current->next;
-	}
+                if (ret == 1)
+                {
+                    retval = current;
+                    goto finish;
+                }
+            } else {
+                retval = current;
+                goto finish;
+            }
+        }
+        current = current->next;
+    }
 finish:
 	return retval;
 }
@@ -507,15 +512,18 @@ out_of_while:
 		goto error;
 	}
 
-        /* Check SMACK label */
+    /* Check SMACK label */
+    if (smack_check())
+    {
         ret = smack_new_label_from_socket(sockfd, &smack_label);
         if (ret != 0)
-	{
-		SEC_SVR_DBG("Error checking peer label: %d", ret);
-		free(added);
-		added = NULL;
-		goto error;
-	}
+		{
+			SEC_SVR_DBG("Error checking peer label: %d", ret);
+			free(added);
+			added = NULL;
+			goto error;
+		}
+    }
 
 	added->path_len = strlen(exe);
 	added->path = calloc(1, strlen(exe));
