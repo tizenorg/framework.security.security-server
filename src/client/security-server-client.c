@@ -29,6 +29,7 @@
 #include <sys/smack.h>
 #include <fcntl.h>
 
+#include "smack-check.h"
 #include "security-server.h"
 #include "security-server-common.h"
 #include "security-server-comm.h"
@@ -1031,7 +1032,7 @@ SECURITY_SERVER_API
 char * security_server_get_smacklabel_cookie(const char * cookie)
 {
     char * label = NULL;
-    int sockfd = -1, retval, pid = -1;
+    int sockfd = -1, retval;
     response_header hdr;
 
     if(cookie == NULL)
@@ -1101,10 +1102,10 @@ error:
     return NULL;
 }
 
-	SECURITY_SERVER_API
+SECURITY_SERVER_API
 char * security_server_get_smacklabel_sockfd(int fd)
 {
-	char * label = NULL;
+    char * label = NULL;
 
     if (!smack_check())
     {
@@ -1120,7 +1121,7 @@ char * security_server_get_smacklabel_sockfd(int fd)
         return NULL;
     }
 
-	return label;
+    return label;
 }
 
 SECURITY_SERVER_API
