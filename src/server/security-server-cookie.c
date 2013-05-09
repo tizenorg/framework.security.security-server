@@ -59,7 +59,7 @@ cookie_list *delete_cookie_item(cookie_list *cookie)
 	cookie_list *retval = NULL;
 	if(cookie == NULL)
 	{
-		SEC_SVR_DBG("%s", "Cannot delete null cookie");
+		SEC_SVR_ERR("%s", "Cannot delete null cookie");
 		return retval;
 	}
 
@@ -108,7 +108,7 @@ cookie_list * garbage_collection(cookie_list *cookie)
 			else
 			{
 				/* Some error occurred */
-				SEC_SVR_DBG("Error occurred on stat: errno = %d", errno);
+				SEC_SVR_ERR("Error occurred on stat: errno = %d", errno);
 				return cookie;
 			}
 		}
@@ -144,7 +144,7 @@ cookie_list *search_existing_cookie(int pid, const cookie_list *c_list)
 			exe = read_exe_path_from_proc(pid);
 			if(exe == NULL)
 			{
-				SEC_SVR_DBG("%s", "cannot read cmdline");
+				SEC_SVR_ERR("%s", "cannot read cmdline");
 				return NULL;
 			}
 			/* Check the path is different.  */
@@ -154,7 +154,7 @@ cookie_list *search_existing_cookie(int pid, const cookie_list *c_list)
 				debug_cmdline = malloc(current->path_len + 1);
 				if(debug_cmdline == NULL)
 				{
-					SEC_SVR_DBG("%s", "out of memory error");
+					SEC_SVR_ERR("%s", "out of memory error");
 					free(exe);
 					return NULL;
 				}
@@ -307,8 +307,12 @@ cookie_list *search_cookie_new(const cookie_list *c_list,
             if (smack_check())
             {
                 ret = smack_have_access(current->smack_label, object, access_rights);
+
                 SEC_SVR_DBG("SMACK have access returned %d", ret);
-                SEC_SVR_DBG("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=%s, result=%d, caller_path=%s", current->pid, current->smack_label, object, access_rights, ret, current->path);
+                if (ret > 0)
+                    SEC_SVR_DBG("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=%s, result=%d, caller_path=%s", current->pid, current->smack_label, object, access_rights, ret, current->path);
+                else
+                    SEC_SVR_ERR("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=%s, result=%d, caller_path=%s", current->pid, current->smack_label, object, access_rights, ret, current->path);
 
                 if (ret == 1)
                 {
@@ -334,19 +338,19 @@ int generate_random_cookie(unsigned char *cookie, int size)
 	int fd, ret;
 
     if (cookie == NULL) {
-        SEC_SVR_DBG("%s", "Null pointer passed to function");
+        SEC_SVR_ERR("%s", "Null pointer passed to function");
         return SECURITY_SERVER_ERROR_UNKNOWN;
     }
 	fd = open("/dev/urandom", O_RDONLY);
 	if(fd < 0)
 	{
-		SEC_SVR_DBG("%s", "Cannot open /dev/urandom");
+		SEC_SVR_ERR("%s", "Cannot open /dev/urandom");
 		return SECURITY_SERVER_ERROR_FILE_OPERATION;
 	}
 	ret = TEMP_FAILURE_RETRY(read(fd, cookie, size));
 	if(ret < size)
 	{
-		SEC_SVR_DBG("Cannot read /dev/urandom: %d", ret);
+		SEC_SVR_ERR("Cannot read /dev/urandom: %d", ret);
 		ret = SECURITY_SERVER_ERROR_FILE_OPERATION;
 		goto error;
 	}
@@ -382,7 +386,7 @@ cookie_list *create_cookie_item(int pid, int sockfd, cookie_list *c_list)
     exe = (char *)read_exe_path_from_proc(pid);
     if(exe == NULL)
     {
-        SEC_SVR_DBG("Error on reading /proc/%d/exe", pid);
+        SEC_SVR_ERR("Error on reading /proc/%d/exe", pid);
         goto error;
     }
 
@@ -402,7 +406,7 @@ cookie_list *create_cookie_item(int pid, int sockfd, cookie_list *c_list)
         buf = (char*)malloc(sizeof(char) * 128);
         if(buf == NULL)
         {
-            SEC_SVR_DBG("%s", "Error on malloc()");
+            SEC_SVR_ERR("%s", "Error on malloc()");
             goto error;
         }
         memset(buf, 0x00, 128);
@@ -425,7 +429,7 @@ cookie_list *create_cookie_item(int pid, int sockfd, cookie_list *c_list)
                 tempptr = (char*)realloc(buf, sizeof(char) * (i + 128));
                 if(tempptr == NULL)
                 {
-                    SEC_SVR_DBG("%s", "Error on realloc()");
+                    SEC_SVR_ERR("%s", "Error on realloc()");
                     goto error;
                 }
                 buf = tempptr;
@@ -447,7 +451,7 @@ cookie_list *create_cookie_item(int pid, int sockfd, cookie_list *c_list)
                 tempperm = realloc(permissions, sizeof(int) * perm_num);
                 if(tempperm == NULL)
                 {
-                    SEC_SVR_DBG("%s", "Error on realloc()");
+                    SEC_SVR_ERR("%s", "Error on realloc()");
                     goto error;
                 }
                 permissions = tempperm;
@@ -455,7 +459,7 @@ cookie_list *create_cookie_item(int pid, int sockfd, cookie_list *c_list)
                 permissions[perm_num - 1] = strtoul(token, 0, 10);
                 if (errno != 0)
                 {
-                    SEC_SVR_DBG("cannot change string to integer [%s]", token);
+                    SEC_SVR_ERR("cannot change string to integer [%s]", token);
                     ret = SECURITY_SERVER_ERROR_SERVER_ERROR;
                     goto error;
                 }
@@ -506,7 +510,7 @@ out_of_while:
     ret = generate_random_cookie(added->cookie, SECURITY_SERVER_COOKIE_LEN);
     if(ret != SECURITY_SERVER_SUCCESS)
     {
-        SEC_SVR_DBG("Error on making random cookie: %d", ret);
+        SEC_SVR_ERR("Error on making random cookie: %d", ret);
         free(added);
         added = NULL;
         goto error;
@@ -518,7 +522,7 @@ out_of_while:
         ret = smack_new_label_from_socket(sockfd, &smack_label);
         if (ret != 0)
         {
-            SEC_SVR_DBG("Error checking peer label: %d", ret);
+            SEC_SVR_ERR("Error checking peer label: %d", ret);
             free(added);
             added = NULL;
             goto error;
@@ -562,7 +566,7 @@ int check_stored_cookie(unsigned char *cookie, int size)
 	{
 		if(errno != ENOENT)
 		{
-			SEC_SVR_DBG("Cannot open default cookie. errno=%d", errno);
+			SEC_SVR_ERR("Cannot open default cookie. errno=%d", errno);
 			ret = SECURITY_SERVER_ERROR_FILE_OPERATION;
 			unlink(SECURITY_SERVER_DEFAULT_COOKIE_PATH);
 		}
@@ -573,14 +577,14 @@ int check_stored_cookie(unsigned char *cookie, int size)
 		fd = open(SECURITY_SERVER_DEFAULT_COOKIE_PATH, O_WRONLY | O_CREAT, 0600);
 		if (fd < 0)
 		{
-			SEC_SVR_DBG("Cannot open default cookie errno=%d", errno);
+			SEC_SVR_ERR("Cannot open default cookie errno=%d", errno);
 			ret = SECURITY_SERVER_ERROR_FILE_OPERATION;
 			goto error;
 		}
 		ret = TEMP_FAILURE_RETRY(write(fd, cookie, size));
 		if(ret < size)
 		{
-			SEC_SVR_DBG("%s", "Cannot save default cookie");
+			SEC_SVR_ERR("%s", "Cannot save default cookie");
 			ret = SECURITY_SERVER_ERROR_FILE_OPERATION;
 			goto error;
 		}
@@ -592,7 +596,7 @@ int check_stored_cookie(unsigned char *cookie, int size)
 	ret = TEMP_FAILURE_RETRY(read(fd, cookie, size));
 	if(ret < size)
 	{
-		SEC_SVR_DBG("Cannot read default cookie errno=%d", errno);
+		SEC_SVR_ERR("Cannot read default cookie errno=%d", errno);
 		ret = SECURITY_SERVER_ERROR_FILE_OPERATION;
 		goto error;
 	}
@@ -617,7 +621,7 @@ cookie_list *create_default_cookie(void)
 	ret = check_stored_cookie(first->cookie, SECURITY_SERVER_COOKIE_LEN);
 	if(ret != SECURITY_SERVER_SUCCESS)
 	{
-		SEC_SVR_DBG("Error on making random cookie: %d", ret);
+		SEC_SVR_ERR("Error on making random cookie: %d", ret);
 		free(first);
 		return NULL;
 	}
