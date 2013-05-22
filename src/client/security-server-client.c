@@ -28,6 +28,8 @@
 #include <string.h>
 #include <sys/smack.h>
 #include <fcntl.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 #include "smack-check.h"
 #include "security-server.h"
@@ -112,20 +114,20 @@ int security_server_get_gid(const char *object)
 
 	if(object == NULL)
 	{
-		SEC_SVR_DBG("%s", "Client: object is null or object is too big");
+		SEC_SVR_ERR("%s", "Client: object is null or object is too big");
 		retval = SECURITY_SERVER_API_ERROR_INPUT_PARAM;
 		goto error;
 	}
 	if( strlen(object) > SECURITY_SERVER_MAX_OBJ_NAME )
 	{
-		SEC_SVR_DBG("%s", "object is null or object is too big");
+		SEC_SVR_ERR("%s", "object is null or object is too big");
 		retval = SECURITY_SERVER_API_ERROR_INPUT_PARAM;
 		goto error;
 	}
 
 	if(strlen(object) == 0)
 	{
-		SEC_SVR_DBG("Client: object is is empty");
+		SEC_SVR_ERR("Client: object is is empty");
 		retval = SECURITY_SERVER_API_ERROR_INPUT_PARAM;
 		goto error;
 	}
@@ -135,7 +137,7 @@ int security_server_get_gid(const char *object)
 	if(retval != SECURITY_SERVER_SUCCESS)
 	{
 		/* Error on socket */
-		SEC_SVR_DBG("Connection failed: %d", retval);
+		SEC_SVR_ERR("Connection failed: %d", retval);
 		goto error;
 	}
 	SEC_SVR_DBG("%s", "Client: Security server has been connected");
@@ -146,7 +148,7 @@ int security_server_get_gid(const char *object)
 	if(retval != SECURITY_SERVER_SUCCESS)
 	{
 		/* Error on socket */
-		SEC_SVR_DBG("Send gid request failed: %d", retval);
+		SEC_SVR_ERR("Send gid request failed: %d", retval);
 		goto error;
 	}
 
@@ -154,7 +156,7 @@ int security_server_get_gid(const char *object)
 	retval = recv_get_gid_response(sockfd, &hdr, &gid);
 	if(retval != SECURITY_SERVER_SUCCESS)
 	{
-		SEC_SVR_DBG("Client: Receive response failed: %d", retval);
+		SEC_SVR_ERR("Client: Receive response failed: %d", retval);
 		goto error;
 	}
 	SEC_SVR_DBG("%s", "Client: get gid response has been received");
@@ -164,14 +166,14 @@ int security_server_get_gid(const char *object)
 		if(hdr.basic_hdr.msg_id == SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE)
 		{
 			/* There must be some error */
-			SEC_SVR_DBG("Client: It'll be an error. return code:%d", hdr.return_code);
+			SEC_SVR_ERR("Client: It'll be an error. return code:%d", hdr.return_code);
 			retval = return_code_to_error_code(hdr.return_code);
 			goto error;
 		}
 		else
 		{
 			/* Something wrong with response */
-			SEC_SVR_DBG("Client: Something wrong with response:%d", hdr.basic_hdr.msg_id);
+			SEC_SVR_ERR("Client: Something wrong with response:%d", hdr.basic_hdr.msg_id);
 			retval = SECURITY_SERVER_ERROR_BAD_RESPONSE;
 			goto error;
 		}
@@ -209,7 +211,7 @@ int security_server_get_object_name(gid_t gid, char *object, size_t max_object_s
 	if(retval != SECURITY_SERVER_SUCCESS)
 	{
 		/* Error on socket */
-		SEC_SVR_DBG("Client: connect to server failed: %d", retval);
+		SEC_SVR_ERR("Client: connect to server failed: %d", retval);
 		goto error;
 	}
 
@@ -218,14 +220,14 @@ int security_server_get_object_name(gid_t gid, char *object, size_t max_object_s
 	if(retval != SECURITY_SERVER_SUCCESS)
 	{
 		/* Error on socket */
-		SEC_SVR_DBG("Client: cannot send request: %d", retval);
+		SEC_SVR_ERR("Client: cannot send request: %d", retval);
 		goto error;
 	}
 
 	retval = recv_get_object_name(sockfd, &hdr, object, max_object_size);
 	if(retval != SECURITY_SERVER_SUCCESS)
 	{
-		SEC_SVR_DBG("Client: Receive response failed: %d", retval);
+		SEC_SVR_ERR("Client: Receive response failed: %d", retval);
 		goto error;
 	}
 
@@ -234,13 +236,13 @@ int security_server_get_object_name(gid_t gid, char *object, size_t max_object_s
 		if(hdr.basic_hdr.msg_id == SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE)
 		{
 			/* There must be some error */
-			SEC_SVR_DBG("Client: There is error on response: return code:%d", hdr.basic_hdr.msg_id);
+			SEC_SVR_ERR("Client: There is error on response: return code:%d", hdr.basic_hdr.msg_id);
 			retval = return_code_to_error_code(hdr.return_code);
 		}
 		else
 		{
 			/* Something wrong with response */
-			SEC_SVR_DBG("Client: Some unexpected error happene: return code:%d", hdr.basic_hdr.msg_id);
+			SEC_SVR_ERR("Client: Some unexpected error happene: return code:%d", hdr.basic_hdr.msg_id);
 			retval = SECURITY_SERVER_ERROR_BAD_RESPONSE;
 		}
 		goto error;
@@ -278,7 +280,7 @@ int security_server_request_cookie(char *cookie, size_t max_cookie)
 	if(retval != SECURITY_SERVER_SUCCESS)
 	{
 		/* Error on socket */
-		SEC_SVR_DBG("%s", "Client: connection failed");
+		SEC_SVR_ERR("%s", "Client: connection failed");
 		goto error;
 	}
 
@@ -287,7 +289,7 @@ int security_server_request_cookie(char *cookie, size_t max_cookie)
 	if(retval != SECURITY_SERVER_SUCCESS)
 	{
 		/* Error on socket */
-		SEC_SVR_DBG("Client: send cookie failed: %d", retval);
+		SEC_SVR_ERR("Client: send cookie failed: %d", retval);
 		goto error;
 	}
 	SEC_SVR_DBG("%s", "Client: cookie request sent");
@@ -298,13 +300,13 @@ int security_server_request_cookie(char *cookie, size_t max_cookie)
 		if(hdr.basic_hdr.msg_id == SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE)
 		{
 			/* There must be some error */
-			SEC_SVR_DBG("Client ERROR: There is an error on response. return code:%d", hdr.return_code);
+			SEC_SVR_ERR("Client ERROR: There is an error on response. return code:%d", hdr.return_code);
 			retval = return_code_to_error_code(hdr.return_code);
 		}
 		else
 		{
 			/* Something wrong with response */
-			SEC_SVR_DBG("Client ERROR: Unexpected error occurred:%d", retval);
+			SEC_SVR_ERR("Client ERROR: Unexpected error occurred:%d", retval);
 			retval = SECURITY_SERVER_ERROR_BAD_RESPONSE;
 		}
 		goto error;
@@ -347,7 +349,7 @@ int security_server_check_privilege(const char *cookie, gid_t privilege)
 	if(retval != SECURITY_SERVER_SUCCESS)
 	{
 		/* Error on socket */
-		SEC_SVR_DBG("Send failed: %d", retval);
+		SEC_SVR_ERR("Send failed: %d", retval);
 		goto error;
 	}
 
@@ -359,12 +361,12 @@ int security_server_check_privilege(const char *cookie, gid_t privilege)
 		if(hdr.basic_hdr.msg_id == SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE)
 		{
 			/* There must be some error */
-			SEC_SVR_DBG("Client: Error has been received. return code:%d", hdr.return_code);
+			SEC_SVR_ERR("Client: Error has been received. return code:%d", hdr.return_code);
 		}
 		else
 		{
 			/* Something wrong with response */
-			SEC_SVR_DBG("Client ERROR: Unexpected error occurred:%d", retval);
+			SEC_SVR_ERR("Client ERROR: Unexpected error occurred:%d", retval);
 			retval = SECURITY_SERVER_ERROR_BAD_RESPONSE;
 		}
 		goto error;
@@ -416,7 +418,7 @@ int security_server_check_privilege_by_cookie(const char *cookie,
 	if(retval != SECURITY_SERVER_SUCCESS)
 	{
 		/* Error on socket */
-		SEC_SVR_DBG("Send failed: %d", retval);
+		SEC_SVR_ERR("Send failed: %d", retval);
 		goto error;
 	}
 
@@ -429,13 +431,13 @@ int security_server_check_privilege_by_cookie(const char *cookie,
 		if(hdr.basic_hdr.msg_id == SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE)
 		{
 			/* There must be some error */
-			SEC_SVR_DBG("Client: Error has been received. return code:%d",
+			SEC_SVR_ERR("Client: Error has been received. return code:%d",
                                     hdr.return_code);
 		}
 		else
 		{
 			/* Something wrong with response */
-			SEC_SVR_DBG("Client ERROR: Unexpected error occurred:%d", retval);
+			SEC_SVR_ERR("Client ERROR: Unexpected error occurred:%d", retval);
 			retval = SECURITY_SERVER_ERROR_BAD_RESPONSE;
 		}
 		goto error;
@@ -462,15 +464,40 @@ int security_server_check_privilege_by_sockfd(int sockfd,
 
     char *subject;
     int ret;
+    char * path = NULL;
+
+    //for get socket options
+    struct ucred cr;
+    unsigned int len;
+
+    //SMACK runtime check
+    if (!smack_runtime_check())
+    {
+        SEC_SVR_DBG("%s","No SMACK support on device");
+        return SECURITY_SERVER_API_SUCCESS;
+    }
+
     ret = smack_new_label_from_socket(sockfd, &subject);
     if (ret != 0)
     {
         return SECURITY_SERVER_API_ERROR_SERVER_ERROR;
     }
-    ret = smack_have_access(subject, object, access_rights);
-    SEC_SVR_DBG("SMACK have access returned %d", ret);
-    SEC_SVR_DBG("SS_SMACK: subject=%s, object=%s, access=%s, result=%d", subject, object, access_rights, ret);
 
+    ret = getsockopt(sockfd, SOL_SOCKET, SO_PEERCRED, &cr, &len);
+    if (ret < 0)
+        SEC_SVR_DBG("Error in getsockopt()");
+    else
+        path = read_exe_path_from_proc(cr.pid);
+    ret = smack_have_access(subject, object, access_rights);
+
+    SEC_SVR_DBG("SMACK have access returned %d", ret);
+    if (ret > 0)
+        SEC_SVR_DBG("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=%s, result=%d, caller_path=%s", cr.pid, subject, object, access_rights, ret, path);
+    else
+        SEC_SVR_ERR("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=%s, result=%d, caller_path=%s", cr.pid, subject, object, access_rights, ret, path);
+
+    if (path != NULL)
+        free(path);
     free(subject);
     if (ret == 1)
     {
@@ -515,7 +542,7 @@ int security_server_get_cookie_pid(const char *cookie)
 	if(retval != SECURITY_SERVER_SUCCESS)
 	{
 		/* Error on socket */
-		SEC_SVR_DBG("Client: Send failed: %d", retval);
+		SEC_SVR_ERR("Client: Send failed: %d", retval);
 		goto error;
 	}
 
@@ -527,19 +554,19 @@ int security_server_get_cookie_pid(const char *cookie)
 		if(hdr.basic_hdr.msg_id == SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE)
 		{
 			/* There must be some error */
-			SEC_SVR_DBG("Client: Error has been received. return code:%d", hdr.return_code);
+			SEC_SVR_ERR("Client: Error has been received. return code:%d", hdr.return_code);
 		}
 		else
 		{
 			/* Something wrong with response */
-			SEC_SVR_DBG("Client ERROR: Unexpected error occurred:%d", retval);
+			SEC_SVR_ERR("Client ERROR: Unexpected error occurred:%d", retval);
 			retval = SECURITY_SERVER_ERROR_BAD_RESPONSE;
 		}
 		goto error;
 	}
 	if(hdr.return_code == SECURITY_SERVER_RETURN_CODE_NO_SUCH_COOKIE)
 	{
-		SEC_SVR_DBG("%s"," Client: There is no such cookie exist");
+		SEC_SVR_ERR("%s"," Client: There is no such cookie exist");
 	}
 
 error:
@@ -580,7 +607,7 @@ int security_server_launch_debug_tool(int argc, const char **argv)
 	retval = getuid();
 	if(retval != SECURITY_SERVER_DEVELOPER_UID)
 	{
-		SEC_SVR_DBG("Client: It's not allowed to call this API by uid %d", retval);
+		SEC_SVR_ERR("Client: It's not allowed to call this API by uid %d", retval);
 		retval = SECURITY_SERVER_ERROR_AUTHENTICATION_FAILED;
 		goto error;
 	}
@@ -597,7 +624,7 @@ int security_server_launch_debug_tool(int argc, const char **argv)
 	if(retval != SECURITY_SERVER_SUCCESS)
 	{
 		/* Error on socket */
-		SEC_SVR_DBG("Client: Send failed: %d", retval);
+		SEC_SVR_ERR("Client: Send failed: %d", retval);
 		goto error;
 	}
 
@@ -609,12 +636,12 @@ int security_server_launch_debug_tool(int argc, const char **argv)
 		if(hdr.basic_hdr.msg_id == SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE)
 		{
 			/* There must be some error */
-			SEC_SVR_DBG("Client: Error has been received. return code:%d", hdr.return_code);
+			SEC_SVR_ERR("Client: Error has been received. return code:%d", hdr.return_code);
 		}
 		else
 		{
 			/* Something wrong with response */
-			SEC_SVR_DBG("Client ERROR: Unexpected error occurred:%d", retval);
+			SEC_SVR_ERR("Client ERROR: Unexpected error occurred:%d", retval);
 			retval = SECURITY_SERVER_ERROR_BAD_RESPONSE;
 		}
 		goto error;
@@ -660,7 +687,7 @@ int security_server_is_pwd_valid(unsigned int *current_attempts,
 	if(retval != SECURITY_SERVER_SUCCESS)
 	{
 		/* Error on socket */
-		SEC_SVR_DBG("Client: Send failed: %d", retval);
+		SEC_SVR_ERR("Client: Send failed: %d", retval);
 		goto error;
 	}
 
@@ -672,12 +699,12 @@ int security_server_is_pwd_valid(unsigned int *current_attempts,
 		if(hdr.basic_hdr.msg_id == SECURITY_SERVER_MSG_TYPE_VALID_PWD_RESPONSE)
 		{
 			/* There must be some error */
-			SEC_SVR_DBG("Client: Error has been received. return code:%d", hdr.return_code);
+			SEC_SVR_ERR("Client: Error has been received. return code:%d", hdr.return_code);
 		}
 		else
 		{
 			/* Something wrong with response */
-			SEC_SVR_DBG("Client ERROR: Unexpected error occurred:%d", retval);
+			SEC_SVR_ERR("Client ERROR: Unexpected error occurred:%d", retval);
 			retval = SECURITY_SERVER_ERROR_BAD_RESPONSE;
 		}
 		goto error;
@@ -723,7 +750,7 @@ int security_server_set_pwd(const char *cur_pwd,
 	if(retval != SECURITY_SERVER_SUCCESS)
 	{
 		/* Error on socket */
-		SEC_SVR_DBG("Client: Send failed: %d", retval);
+		SEC_SVR_ERR("Client: Send failed: %d", retval);
 		goto error;
 	}
 
@@ -735,12 +762,12 @@ int security_server_set_pwd(const char *cur_pwd,
 		if(hdr.basic_hdr.msg_id == SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE)
 		{
 			/* There must be some error */
-			SEC_SVR_DBG("Client: Error has been received. return code:%d", hdr.return_code);
+			SEC_SVR_ERR("Client: Error has been received. return code:%d", hdr.return_code);
 		}
 		else
 		{
 			/* Something wrong with response */
-			SEC_SVR_DBG("Client ERROR: Unexpected error occurred:%d", retval);
+			SEC_SVR_ERR("Client ERROR: Unexpected error occurred:%d", retval);
 			retval = SECURITY_SERVER_ERROR_BAD_RESPONSE;
 		}
 		goto error;
@@ -772,7 +799,7 @@ int security_server_set_pwd_validity(const unsigned int valid_period_in_days)
     if(retval != SECURITY_SERVER_SUCCESS)
     {
         /* Error on socket */
-        SEC_SVR_DBG("Client: Send failed: %d", retval);
+        SEC_SVR_ERR("Client: Send failed: %d", retval);
         goto error;
     }
 
@@ -784,12 +811,12 @@ int security_server_set_pwd_validity(const unsigned int valid_period_in_days)
         if(hdr.basic_hdr.msg_id == SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE)
         {
             /* There must be some error */
-            SEC_SVR_DBG("Client: Error has been received. return code:%d", hdr.return_code);
+            SEC_SVR_ERR("Client: Error has been received. return code:%d", hdr.return_code);
         }
         else
         {
             /* Something wrong with response */
-            SEC_SVR_DBG("Client ERROR: Unexpected error occurred:%d", retval);
+            SEC_SVR_ERR("Client ERROR: Unexpected error occurred:%d", retval);
             retval = SECURITY_SERVER_ERROR_BAD_RESPONSE;
         }
         goto error;
@@ -820,7 +847,7 @@ int security_server_set_pwd_max_challenge(const unsigned int max_challenge)
     if(retval != SECURITY_SERVER_SUCCESS)
     {
         /* Error on socket */
-        SEC_SVR_DBG("Client: Send failed: %d", retval);
+        SEC_SVR_ERR("Client: Send failed: %d", retval);
         goto error;
     }
 
@@ -832,12 +859,12 @@ int security_server_set_pwd_max_challenge(const unsigned int max_challenge)
         if(hdr.basic_hdr.msg_id == SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE)
         {
             /* There must be some error */
-            SEC_SVR_DBG("Client: Error has been received. return code:%d", hdr.return_code);
+            SEC_SVR_ERR("Client: Error has been received. return code:%d", hdr.return_code);
         }
         else
         {
             /* Something wrong with response */
-            SEC_SVR_DBG("Client ERROR: Unexpected error occurred:%d", retval);
+            SEC_SVR_ERR("Client ERROR: Unexpected error occurred:%d", retval);
             retval = SECURITY_SERVER_ERROR_BAD_RESPONSE;
         }
         goto error;
@@ -882,7 +909,7 @@ int security_server_reset_pwd(const char *new_pwd,
 	if(retval != SECURITY_SERVER_SUCCESS)
 	{
 		/* Error on socket */
-		SEC_SVR_DBG("Client: Send failed: %d", retval);
+		SEC_SVR_ERR("Client: Send failed: %d", retval);
 		goto error;
 	}
 
@@ -894,12 +921,12 @@ int security_server_reset_pwd(const char *new_pwd,
 		if(hdr.basic_hdr.msg_id == SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE)
 		{
 			/* There must be some error */
-			SEC_SVR_DBG("Client: Error has been received. return code:%d", hdr.return_code);
+			SEC_SVR_ERR("Client: Error has been received. return code:%d", hdr.return_code);
 		}
 		else
 		{
 			/* Something wrong with response */
-			SEC_SVR_DBG("Client ERROR: Unexpected error occurred:%d", retval);
+			SEC_SVR_ERR("Client ERROR: Unexpected error occurred:%d", retval);
 			retval = SECURITY_SERVER_ERROR_BAD_RESPONSE;
 		}
 		goto error;
@@ -944,7 +971,7 @@ int security_server_chk_pwd(const char *challenge,
 	if(retval != SECURITY_SERVER_SUCCESS)
 	{
 		/* Error on socket */
-		SEC_SVR_DBG("Client: Send failed: %d", retval);
+		SEC_SVR_ERR("Client: Send failed: %d", retval);
 		goto error;
 	}
 
@@ -956,12 +983,12 @@ int security_server_chk_pwd(const char *challenge,
 		if(hdr.basic_hdr.msg_id == SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE)
 		{
 			/* There must be some error */
-			SEC_SVR_DBG("Client: Error has been received. return code:%d", hdr.return_code);
+			SEC_SVR_ERR("Client: Error has been received. return code:%d", hdr.return_code);
 		}
 		else
 		{
 			/* Something wrong with response */
-			SEC_SVR_DBG("Client ERROR: Unexpected error occurred:%d", retval);
+			SEC_SVR_ERR("Client ERROR: Unexpected error occurred:%d", retval);
 			retval = SECURITY_SERVER_ERROR_BAD_RESPONSE;
 		}
 		goto error;
@@ -999,7 +1026,7 @@ int security_server_set_pwd_history(int number_of_history)
 	if(retval != SECURITY_SERVER_SUCCESS)
 	{
 		/* Error on socket */
-		SEC_SVR_DBG("Client: Send failed: %d", retval);
+		SEC_SVR_ERR("Client: Send failed: %d", retval);
 		goto error;
 	}
 	retval = recv_generic_response(sockfd, &hdr);
@@ -1010,12 +1037,12 @@ int security_server_set_pwd_history(int number_of_history)
 		if(hdr.basic_hdr.msg_id == SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE)
 		{
 			/* There must be some error */
-			SEC_SVR_DBG("Client: Error has been received. return code:%d", hdr.return_code);
+			SEC_SVR_ERR("Client: Error has been received. return code:%d", hdr.return_code);
 		}
 		else
 		{
 			/* Something wrong with response */
-			SEC_SVR_DBG("Client ERROR: Unexpected error occurred:%d", retval);
+			SEC_SVR_ERR("Client ERROR: Unexpected error occurred:%d", retval);
 			retval = SECURITY_SERVER_ERROR_BAD_RESPONSE;
 		}
 		goto error;
@@ -1053,7 +1080,7 @@ char * security_server_get_smacklabel_cookie(const char * cookie)
     if(retval != SECURITY_SERVER_SUCCESS)
     {
         /* Error on socket */
-        SEC_SVR_DBG("Client: Send failed: %d", retval);
+        SEC_SVR_ERR("Client: Send failed: %d", retval);
         goto error;
     }
 
@@ -1061,7 +1088,7 @@ char * security_server_get_smacklabel_cookie(const char * cookie)
     label = calloc(SMACK_LABEL_LEN + 1, 1);
     if(NULL == label)
     {
-        SEC_SVR_DBG("Client ERROR: Memory allocation error");
+        SEC_SVR_ERR("Client ERROR: Memory allocation error");
         goto error;
     }
 
@@ -1073,19 +1100,19 @@ char * security_server_get_smacklabel_cookie(const char * cookie)
         if(hdr.basic_hdr.msg_id == SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE)
         {
             /* There must be some error */
-            SEC_SVR_DBG("Client: Error has been received. return code:%d", hdr.return_code);
+            SEC_SVR_ERR("Client: Error has been received. return code:%d", hdr.return_code);
         }
         else
         {
             /* Something wrong with response */
-            SEC_SVR_DBG("Client ERROR: Unexpected error occurred:%d", retval);
+            SEC_SVR_ERR("Client ERROR: Unexpected error occurred:%d", retval);
             retval = SECURITY_SERVER_ERROR_BAD_RESPONSE;
         }
         goto error;
     }
     if(hdr.return_code == SECURITY_SERVER_RETURN_CODE_NO_SUCH_COOKIE)
     {
-        SEC_SVR_DBG("%s"," Client: There is no such cookie exist");
+        SEC_SVR_ERR("%s"," Client: There is no such cookie exist");
     }
 
 error:
@@ -1117,7 +1144,7 @@ char * security_server_get_smacklabel_sockfd(int fd)
 
     if (smack_new_label_from_socket(fd, &label) != 0)
     {
-        SEC_SVR_DBG("Client ERROR: Unable to get socket SMACK label");
+        SEC_SVR_ERR("Client ERROR: Unable to get socket SMACK label");
         return NULL;
     }
 
@@ -1130,6 +1157,9 @@ int security_server_app_give_access(const char *customer_label, int customer_pid
     int sockfd = -1, retval;
     response_header hdr;
 
+    if (1 != smack_check())
+        return SECURITY_SERVER_SUCCESS;
+
     retval = connect_to_server(&sockfd);
     if(retval != SECURITY_SERVER_SUCCESS)
     {
@@ -1141,7 +1171,7 @@ int security_server_app_give_access(const char *customer_label, int customer_pid
     if(retval != SECURITY_SERVER_SUCCESS)
     {
         /* Error on socket */
-        SEC_SVR_DBG("Client: Send failed: %d", retval);
+        SEC_SVR_ERR("Client: Send failed: %d", retval);
         goto out;
     }
 
@@ -1149,9 +1179,9 @@ int security_server_app_give_access(const char *customer_label, int customer_pid
 
     retval = return_code_to_error_code(hdr.return_code);
     if(hdr.basic_hdr.msg_id == SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE) {
-        SEC_SVR_DBG("Client: Error has been received. return code:%d", hdr.return_code);
+        SEC_SVR_ERR("Client: Error has been received. return code:%d", hdr.return_code);
     } else if (hdr.basic_hdr.msg_id != SECURITY_SERVER_MSG_TYPE_APP_GIVE_ACCESS_RESPONSE) {
-        SEC_SVR_DBG("Client: Wrong response type.");
+        SEC_SVR_ERR("Client: Wrong response type.");
         retval = SECURITY_SERVER_ERROR_BAD_RESPONSE;
     }
 out:
@@ -1191,7 +1221,7 @@ int security_server_check_privilege_by_pid(int pid, const char *object, const ch
     retval = send_pid_privilege_request(sockfd, pid, object, access_rights);
     if (retval != SECURITY_SERVER_SUCCESS) {
         /* Error on socket */
-        SEC_SVR_DBG("Client: Send failed: %d", retval);
+        SEC_SVR_ERR("Client: Send failed: %d", retval);
         goto error;
     }
 
@@ -1205,11 +1235,11 @@ int security_server_check_privilege_by_pid(int pid, const char *object, const ch
     if (hdr.basic_hdr.msg_id != SECURITY_SERVER_MSG_TYPE_CHECK_PID_PRIVILEGE_RESPONSE) {
         if (hdr.basic_hdr.msg_id == SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE) {
             /* There must be some error */
-            SEC_SVR_DBG("Client: Error has been received. return code:%d", hdr.return_code);
+            SEC_SVR_ERR("Client: Error has been received. return code:%d", hdr.return_code);
         }
         else {
             /* Something wrong with response */
-            SEC_SVR_DBG("Client ERROR: Unexpected error occurred:%d", retval);
+            SEC_SVR_ERR("Client ERROR: Unexpected error occurred:%d", retval);
             retval = SECURITY_SERVER_ERROR_BAD_RESPONSE;
         }
         goto error;
@@ -1221,7 +1251,7 @@ int security_server_check_privilege_by_pid(int pid, const char *object, const ch
         SEC_SVR_DBG("%s","Client: There is privilege match");
         retval = SECURITY_SERVER_SUCCESS;
     } else {
-        SEC_SVR_DBG("%s","Client: There is no privilege match");
+        SEC_SVR_ERR("%s","Client: There is no privilege match");
         retval = SECURITY_SERVER_ERROR_ACCESS_DENIED;
     }
 
