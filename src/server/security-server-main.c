@@ -36,6 +36,8 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <poll.h>
+#include <grp.h>
+#include <stdint.h>
 
 #include <privilege-control.h>
 #include <security-server-system-observer.h>
@@ -103,6 +105,55 @@ void print_cookie(cookie_list *list)
 	printf("next: %p\n", list->next);
 }
 #endif
+
+char *read_exe_path_from_proc(pid_t pid)
+{
+	char link[32];
+	char *exe = NULL;
+	size_t size = 64;
+	ssize_t cnt = 0;
+
+	// get link to executable
+	snprintf(link, sizeof(link), "/proc/%d/exe", pid);
+
+	for (;;)
+	{
+		exe = malloc(size);
+		if (exe == NULL )
+		{
+			SEC_SVR_ERR("Out of memory");
+			return NULL ;
+		}
+
+		// read link target
+		cnt = readlink(link, exe, size);
+
+		// error
+		if (cnt < 0 || (size_t) cnt > size)
+		{
+			SEC_SVR_ERR("Can't locate process binary for pid[%d]", pid);
+			free(exe);
+			return NULL ;
+		}
+
+		// read less than requested
+		if ((size_t) cnt < size)
+			break;
+
+		// read exactly the number of bytes requested
+		free(exe);
+		if (size > (SIZE_MAX >> 1))
+		{
+			SEC_SVR_ERR("Exe path too long (more than %d characters)", size);
+			return NULL ;
+		}
+		size <<= 1;
+	}
+	// readlink does not append null byte to buffer.
+	exe[cnt] = '\0';
+	return exe;
+}
+
 
 /* Object name is actually name of a Group ID *
  * This function opens /etc/group file and search group ID and
@@ -204,85 +255,69 @@ error:
 	return ret;
 }
 
-/* Search GID from group name *
- * This function opens /etc/group and search group name by given gid */
+/*
+ * Searches for group ID by given group name
+ */
+
 int search_gid(const char *obj)
 {
-	FILE *fp = NULL;
-	char *linebuf = NULL, *token = NULL, *token2, *tempstr = NULL;
-	int ret = SECURITY_SERVER_ERROR_NO_SUCH_OBJECT, tmp_gid, bufsize;
+        int ret = 0;
+        struct group *grpbuf = NULL;
+        struct group grp;
+        char *buf = NULL;
+	char *bigger_buf = NULL;
+        long int max_buf_size = 0;
 
-	SEC_SVR_DBG("Searching for object %s", obj);
+        /*
+         * The maximum needed size for buf can be found using sysconf(3) with the argument _SC_GETGR_R_SIZE_MAX
+	 * If _SC_GETGR_R_SIZE_MAX is not returned we set max_buf_size to 1024 bytes. Enough to store few groups.
+         */
+        max_buf_size = sysconf(_SC_GETGR_R_SIZE_MAX);
+        if(max_buf_size == -1)
+                max_buf_size = 1024;
 
-	fp = fopen("/etc/group", "r");
-	if(fp == NULL)
-	{
-		/* cannot open /etc/group */
-		SEC_SVR_ERR("%s", "cannot open /etc/group");
-		return SECURITY_SERVER_ERROR_FILE_OPERATION;
-	}
+        buf = malloc((size_t)max_buf_size);
+        if(buf == NULL)
+        {
+                ret = SECURITY_SERVER_ERROR_OUT_OF_MEMORY;
+                SEC_SVR_ERR("Out Of Memory");
+                goto error;
+        }
 
-	linebuf = malloc(128);
-	bufsize = 128;
-	if(linebuf == NULL)
-	{
-		ret = SECURITY_SERVER_ERROR_OUT_OF_MEMORY;
-		SEC_SVR_ERR("%s", "Out Of Memory");
-		goto error;
-	}
+        /*
+         * There can be some corner cases when for example user is assigned to a lot of groups.
+         * In that case if buffer is to small getgrnam_r will return ERANGE error.
+         * Solution could be calling getgrnam_r with bigger buffer until it's enough big.
+         */
+	while((ret = getgrnam_r(obj, &grp, buf, (size_t)max_buf_size, &grpbuf)) == ERANGE) {
+		max_buf_size *= 2;
 
-	bzero(linebuf, bufsize);
-	while(fgets(linebuf, bufsize, fp) != NULL)
-	{
-		while(linebuf[bufsize -2] != 0 )
-		{
-			linebuf[bufsize -1] = (char) fgetc(fp);
-			tempstr = realloc(linebuf, bufsize + 128);
-			if(tempstr == NULL)
-			{
-				ret = SECURITY_SERVER_ERROR_OUT_OF_MEMORY;
-				goto error;
-			}
-			linebuf = tempstr;
-			bzero(linebuf + bufsize, 128);
-			fgets(linebuf + bufsize, 128, fp);
-			bufsize += 128;
-		}
-
-		token = strtok(linebuf, ":");	/* group name */
-		token2 = strtok(NULL, ":");	/* group password */
-		token2 = strtok(NULL, ":");	/* gid */
-		if(token2 == NULL)
-		{
-			SEC_SVR_ERR("/etc/group is not valid. cannot find gid: [%s]", linebuf);
-			ret = SECURITY_SERVER_ERROR_SERVER_ERROR;
-			goto error;
-		}
-		errno = 0;
-		tmp_gid = strtoul(token2, 0, 10);
-		if ( errno != 0 )
-		{
-			SEC_SVR_ERR("cannot change string to integer [%s]", token2);
-			ret = SECURITY_SERVER_ERROR_SERVER_ERROR;
+		bigger_buf = realloc(buf, (size_t)max_buf_size);
+		if(bigger_buf == NULL) {
+			ret = SECURITY_SERVER_ERROR_OUT_OF_MEMORY;
+			SEC_SVR_ERR("Out Of Memory");
 			goto error;
 		}
 
-		if(strcmp(obj, token) == 0)
-		{
-			/* We found it */
-			ret = tmp_gid;
-			SEC_SVR_DBG("GID of %s is found: %d", obj, ret);
-			break;
-		}
-		bzero(linebuf, bufsize);
+		buf = bigger_buf;
 	}
+
+        if(ret != 0)
+        {
+                ret = SECURITY_SERVER_ERROR_SERVER_ERROR;
+                SEC_SVR_ERR("getgrnam_r failed with error %s\n", strerror(errno));
+                goto error;
+        } else if (grpbuf == NULL) {
+                ret =  SECURITY_SERVER_ERROR_NO_SUCH_OBJECT;
+                SEC_SVR_ERR("Cannot find gid for group %s\n", obj);
+                goto error;
+        }
+
+        ret = grpbuf->gr_gid;
 
 error:
-	if(linebuf != NULL)
-		free(linebuf);
-	if(fp != NULL)
-		fclose(fp);
-	return ret;
+	free(buf);
+        return ret;
 }
 
 /* Signal handler for processes */
@@ -337,6 +372,58 @@ int execute_debug_tool(int argc, char *const *argv, int server_sockfd, int clien
         return SECURITY_SERVER_ERROR_SERVER_ERROR;
     }
     return SECURITY_SERVER_SUCCESS;
+}
+
+/* Authenticate the application is middleware daemon
+ * The middleware must run as root and the cmd line must be pre listed */
+int authenticate_developer_shell(int sockfd)
+{
+	int retval = SECURITY_SERVER_ERROR_AUTHENTICATION_FAILED;
+	struct ucred cr;
+	unsigned int cl = sizeof(cr);
+	char *exe = NULL;
+
+	/* get PID of socket peer */
+	if(getsockopt(sockfd, SOL_SOCKET, SO_PEERCRED, &cr, &cl) != 0)
+	{
+		retval = SECURITY_SERVER_ERROR_SOCKET;
+		SEC_SVR_ERR("%s", "Error on getsockopt");
+		goto error;
+	}
+
+	/* All middlewares will run as root */
+	if(cr.uid != SECURITY_SERVER_DEVELOPER_UID)
+	{
+		retval = SECURITY_SERVER_ERROR_AUTHENTICATION_FAILED;
+		SEC_SVR_ERR("Non root process has called API: %d", cr.uid);
+		goto error;
+	}
+
+	/* Read executable path of the PID from proc fs */
+	exe = read_exe_path_from_proc(cr.pid);
+	if(exe  == NULL)
+	{
+		/* It's weired. no file in proc file system, */
+		retval = SECURITY_SERVER_ERROR_FILE_OPERATION;
+		SEC_SVR_ERR("Error on opening /proc/%d/exe", cr.pid);
+		goto error;
+	}
+
+	/* Search exe of the peer that is really debug tool */
+	if(strcmp(exe, SECURITY_SERVER_DEBUG_TOOL_PATH) != 0)
+	{
+		SEC_SVR_ERR("Error: Wrong exe path [%s]", exe);
+		retval = SECURITY_SERVER_ERROR_AUTHENTICATION_FAILED;
+		goto error;
+	}
+	retval = SECURITY_SERVER_SUCCESS;
+	SEC_SVR_DBG("%s", "Client Authenticated");
+
+error:
+	if(exe != NULL)
+		free(exe);
+
+	return retval;
 }
 
 int process_cookie_request(int sockfd)
@@ -925,11 +1012,9 @@ int process_pid_privilege_check(int sockfd, int datasize)
     char * object = NULL;
     char * access_rights = NULL;
     unsigned char return_code;
-    //file descriptor
-    int fd = -1;
-    const int B_SIZE = 64;
-    char buff[B_SIZE];
     char * path = NULL;
+    char subject[SMACK_LABEL_LEN + 1];
+    subject[0] = '\0';
 
     //authenticate client
     retval = authenticate_client_middleware(sockfd, &client_pid);
@@ -961,46 +1046,28 @@ int process_pid_privilege_check(int sockfd, int datasize)
         goto error;
     }
 
-    bzero(buff, B_SIZE);
     if (smack_check()) {
-        //get SMACK label of process
-        snprintf(buff, B_SIZE, "/proc/%d/attr/current", pid);
+        retval = smack_pid_have_access(pid, object, access_rights);
+        SEC_SVR_DBG("smack_pid_have_access returned %d", retval);
 
-        fd = open(buff, O_RDONLY, 0644);
-        if (fd < 0) {
-            SEC_SVR_ERR("%s", "Error open()");
-            retval = SECURITY_SERVER_ERROR_UNKNOWN;
-            goto error;
+        if(get_smack_label_from_process(pid, subject) != PC_OPERATION_SUCCESS) {
+            // subject label is set to empty string
+            SEC_SVR_ERR("get_smack_label_from_process failed. Subject label has not been read.");
+        } else {
+            SEC_SVR_DBG("Subject label of client PID %d is: %s", pid, subject);
         }
-
-        bzero(buff, B_SIZE);
-        retval = read(fd, buff, B_SIZE);
-        if (retval < 0) {
-            SEC_SVR_ERR("%s", "Error read()");
-            retval = SECURITY_SERVER_ERROR_UNKNOWN;
-            goto error;
-        }
-
-        //now we have SMACK label in buff and we call libsmack
-        SEC_SVR_DBG("Subject label of client PID %d is: %s", pid, buff);
-        retval = smack_have_access(buff, object, access_rights);
-        SEC_SVR_DBG("SMACK have access returned %d", retval);
     } else {
         SEC_SVR_DBG("SMACK is not available. Subject label has not been read.");
         retval = 1;
     }
 
     path = read_exe_path_from_proc(pid);
-    //now we have SMACK label in buff and we call libsmack
-    SEC_SVR_DBG("Subject label of client PID %d is: %s", pid, buff);
 
-    retval = smack_have_access(buff, object, access_rights);
-    SEC_SVR_DBG("SMACK have access returned %d", retval);
     if (retval > 0)
-        SEC_SVR_DBG("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=%s, result=%d, caller_path=%s", pid, buff, object, access_rights, retval, path);
+        SEC_SVR_DBG("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=%s, result=%d, caller_path=%s", pid, subject, object, access_rights, retval, path);
     else
-        SEC_SVR_ERR("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=%s, result=%d, caller_path=%s", pid, buff, object, access_rights, retval, path);
-    
+        SEC_SVR_ERR("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=%s, result=%d, caller_path=%s", pid, subject, object, access_rights, retval, path);
+
     if (path != NULL)
         free(path);
 
@@ -1018,8 +1085,6 @@ int process_pid_privilege_check(int sockfd, int datasize)
         SEC_SVR_ERR("ERROR: Cannot send generic response: %d", retval);
 
 error:
-    if (fd >= 0)
-        close(fd);
 
     if (object != NULL)
         free(object);
@@ -1133,20 +1198,160 @@ error:
     return retval;
 }
 
+
+/* Send exe path response to client
+ *
+ * Get exe path response packet format
+ *  0                   1                   2                   3
+ *  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+ * |---------------------------------------------------------------|
+ * | version=0x01  |MessageID=0x24 |Message Length = 4+path length |
+ * |---------------------------------------------------------------|
+ * |  return code  |  Path length  |             Path              |
+ * |---------------------------------------------------------------|
+
+*/
+int send_exe_path_response(int sockfd, const char* path)
+{
+	response_header hdr;
+	unsigned char* msg = NULL;
+	unsigned char* ptr = NULL;
+	int ret;
+	size_t path_len = 0;
+	unsigned short msg_len = 0;
+
+	if (!path) {
+		SEC_SVR_ERR("Path is NULL");
+		return SECURITY_SERVER_ERROR_INPUT_PARAM;
+	}
+
+	path_len = strlen(path);
+	msg_len = sizeof(hdr) + sizeof(size_t) + path_len;
+	msg = (unsigned char*)malloc(msg_len*sizeof(unsigned char));
+	if (!msg) {
+		SEC_SVR_ERR("malloc failed");
+		return SECURITY_SERVER_ERROR_OUT_OF_MEMORY;
+	}
+
+	/* Assemble header */
+	hdr.basic_hdr.version = SECURITY_SERVER_MSG_VERSION;
+	hdr.basic_hdr.msg_id = SECURITY_SERVER_MSG_TYPE_EXE_PATH_RESPONSE;
+	hdr.basic_hdr.msg_len = sizeof(size_t) + path_len;
+	hdr.return_code = SECURITY_SERVER_RETURN_CODE_SUCCESS;
+
+	/* Prepare packet */
+	ptr = msg;
+	memcpy(ptr, &hdr, sizeof(hdr));
+	ptr += sizeof(hdr);
+	memcpy(ptr, &path_len, sizeof(size_t));
+	ptr += sizeof(size_t);
+	memcpy(ptr, path, path_len);
+
+	/* Check poll */
+	ret = check_socket_poll(sockfd, POLLOUT, SECURITY_SERVER_SOCKET_TIMEOUT_MILISECOND);
+	if(ret == SECURITY_SERVER_ERROR_POLL)
+	{
+		SEC_SVR_ERR("%s", "poll() error");
+		ret = SECURITY_SERVER_ERROR_SEND_FAILED;
+		goto out;
+	}
+	if(ret == SECURITY_SERVER_ERROR_TIMEOUT)
+	{
+		SEC_SVR_ERR("%s", "poll() timeout");
+		ret = SECURITY_SERVER_ERROR_SEND_FAILED;
+		goto out;
+	}
+
+	/* Send it */
+	ret = TEMP_FAILURE_RETRY(write(sockfd, msg, msg_len));
+	if(ret <  msg_len)
+	{
+		SEC_SVR_ERR("Error on write(): %d", ret);
+		ret = SECURITY_SERVER_ERROR_SEND_FAILED;
+		goto out;
+	}
+	ret = SECURITY_SERVER_SUCCESS;
+
+out:
+	free(msg);
+	return ret;
+}
+
+
+int process_exe_path_request(int sockfd)
+{
+	pid_t pid;
+	int retval;
+	char* exe = NULL;
+
+	// read pid
+	retval = TEMP_FAILURE_RETRY(read(sockfd, &pid, sizeof(pid_t)));
+	if (retval < (ssize_t) sizeof(pid_t))
+	{
+		SEC_SVR_ERR("Server Error: recieve failed: %d", retval);
+		retval = send_generic_response(
+				sockfd,
+				SECURITY_SERVER_MSG_TYPE_EXE_PATH_RESPONSE,
+				SECURITY_SERVER_RETURN_CODE_BAD_REQUEST);
+
+		if (retval != SECURITY_SERVER_SUCCESS)
+			SEC_SVR_ERR("Server ERROR: Cannot send generic response: %d", retval);
+		goto error;
+	}
+
+	SEC_SVR_DBG("Server: Get exe path request for pid %d", pid);
+
+	// get executable path
+	exe = read_exe_path_from_proc(pid);
+	if (!exe)
+	{
+		SEC_SVR_ERR("Server: Failed to read executable path for pid %d", pid);
+		retval = send_generic_response(
+				sockfd,
+				SECURITY_SERVER_MSG_TYPE_EXE_PATH_RESPONSE,
+				SECURITY_SERVER_RETURN_CODE_SERVER_ERROR);
+
+		if (retval != SECURITY_SERVER_SUCCESS)
+			SEC_SVR_ERR("Server ERROR: Cannot send generic response: %d", retval);
+		goto error;
+	}
+
+	// send response
+	retval = send_exe_path_response(sockfd, exe);
+	if (retval != SECURITY_SERVER_SUCCESS)
+		SEC_SVR_ERR("ERROR: Cannot send exe path response: %d", retval);
+
+error:
+	free(exe);
+	return retval;
+}
+
 int client_has_access(int sockfd, const char *object) {
     char *label = NULL;
     int ret = 0;
     int pid = -1;
     int uid = -1;
+    int retval;
+    struct ucred socopt;
+    unsigned int socoptSize = sizeof(socopt);
 
     if (smack_check())
     {
-
-        if(smack_new_label_from_socket(sockfd, &label))
+        retval = getsockopt(sockfd, SOL_SOCKET, SO_PEERCRED, &socopt, &socoptSize);
+        if (retval != 0) {
+            SEC_SVR_DBG("%s", "Error on getsockopt");
             return 0;
+        }
+        //now we have PID in sockopt.pid
 
-        if (0 >= (ret = smack_have_access(label, object, "rw")))
+        if(smack_new_label_from_socket(sockfd, &label)) {
+            SEC_SVR_ERR("%s", "Error on smack_new_label_from_socket");
+            label = NULL;
+        }
+
+        if (0 >= (ret = smack_pid_have_access(socopt.pid, object, "rw"))) {
             ret = 0;
+        }
     }
 
     if (SECURITY_SERVER_SUCCESS == authenticate_client_application(sockfd, &pid, &uid))
@@ -1292,6 +1497,11 @@ void *security_server_thread(void *param)
                     SECURITY_SERVER_RETURN_CODE_ACCESS_DENIED);
             }
             break;
+
+		case SECURITY_SERVER_MSG_TYPE_EXE_PATH_REQUEST:
+			SEC_SVR_DBG("Server: get executable path by pid request received");
+			process_exe_path_request(client_sockfd);
+			break;
 /************************************************************************************************/
 /* Just for test. This code must be removed on release */
 		case SECURITY_SERVER_MSG_TYPE_GET_ALL_COOKIES_REQUEST:
