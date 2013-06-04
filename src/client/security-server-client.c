@@ -588,6 +588,12 @@ int security_server_check_privilege_by_sockfd(int sockfd,
                                               const char *object,
                                               const char *access_rights)
 {
+    if (!smack_check())
+    {
+        SEC_SVR_DBG("%s","No SMACK support on device");
+        return SECURITY_SERVER_API_SUCCESS;
+    }
+
     char *subject;
     int ret;
     char * path = NULL;
