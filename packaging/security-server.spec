@@ -33,23 +33,6 @@ Requires(postun): /sbin/ldconfig
 %description -n libsecurity-server-client
 Security server package (client)
 
-#%package -n wrt-security
-#Summary:    wrt-security-daemon and client libraries.
-#Group:      Development/Libraries
-#Requires(post): /sbin/ldconfig
-#Requires(postun): /sbin/ldconfig
-#
-#%description -n wrt-security
-#Wrt-security-daemon and client libraries.
-#
-#%package -n wrt-security-devel
-#Summary:    Header files for client libraries.
-#Group:      Development/Libraries
-#Requires:   wrt-security = %{version}-%{release}
-#
-#%description -n wrt-security-devel
-#Developer files for client libraries.
-
 %package -n libsecurity-server-client-devel
 Summary:    Security server (client-devel)
 Group:      Development/Libraries
@@ -98,32 +81,22 @@ ln -s ../security-server.service %{buildroot}/usr/lib/systemd/system/multi-user.
 ln -s ../security-server.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server.socket
 ln -s ../security-server-data-share.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server-data-share.socket
 
-mkdir -p %{buildroot}/usr/lib/systemd/system/multi-user.target.wants
-install -m 0644 %{SOURCE3} %{buildroot}/usr/lib/systemd/system/security-server.service
-ln -s ../security-server.service %{buildroot}/usr/lib/systemd/system/multi-user.target.wants/security-server.service
-
-
-%preun
-if [ $1 == 0 ]; then
-    systemctl stop security-server.service
-fi
+%clean
+rm -rf %{buildroot}
 
 %post
 systemctl daemon-reload
-if [ $1 == 1 ]; then
+if [ "$1" = 1 ]; then
     systemctl restart security-server.service
 fi
-mkdir -p /etc/rc.d/rc3.d
-mkdir -p /etc/rc.d/rc5.d
-ln -sf /etc/rc.d/init.d/security-serverd /etc/rc.d/rc3.d/S10security-server
-ln -sf /etc/rc.d/init.d/security-serverd /etc/rc.d/rc5.d/S10security-server
+
+%preun
+if [ "$1" = 0 ]; then
+    systemctl stop security-server.service
+fi
 
 %postun
 systemctl daemon-reload
-if [ "$1" = 0 ]; then
-    rm -f /etc/rc.d/rc3.d/S10security-server
-    rm -f /etc/rc.d/rc5.d/S10security-server
-fi
 
 %post -n libsecurity-server-client -p /sbin/ldconfig
 
@@ -131,10 +104,6 @@ fi
 
 %files -n security-server
 %manifest %{_datadir}/security-server.manifest
-%defattr(-,root,root,-)
-/usr/lib/systemd/system/multi-user.target.wants/security-server.service
-/usr/lib/systemd/system/security-server.service
-%attr(755,root,root) /etc/rc.d/init.d/security-serverd
 %attr(755,root,root) /usr/bin/security-server
 %{_libdir}/libsecurity-server-commons.so.*
 %attr(-,root,root) /usr/lib/systemd/system/multi-user.target.wants/security-server.service
