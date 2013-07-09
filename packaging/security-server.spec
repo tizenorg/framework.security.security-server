@@ -1,7 +1,7 @@
 #sbs-git:slp/pkgs/s/security-server security-server 0.0.37
 Name:       security-server
 Summary:    Security server and utilities
-Version:    0.0.77
+Version:    0.0.78
 Release:    1
 Group:      TO_BE/FILLED_IN
 License:    Apache License, Version 2.0
@@ -82,7 +82,8 @@ Certificates for wrt.
 export LDFLAGS+="-Wl,--rpath=%{_libdir}"
 
 %cmake . -DVERSION=%{version} \
-        -DCMAKE_BUILD_TYPE=%{?build_type:%build_type}
+        -DCMAKE_BUILD_TYPE=RELEASE \
+        -DCMAKE_VERBOSE_MAKEFILE=OFF
 make %{?jobs:-j%jobs}
 
 
@@ -133,6 +134,7 @@ fi
 /usr/lib/systemd/system/security-server.service
 %attr(755,root,root) /etc/rc.d/init.d/security-serverd
 %attr(755,root,root) /usr/bin/security-server
+%{_libdir}/libsecurity-server-commons.so.*
 
 %{_datadir}/license/%{name}
 
@@ -145,5 +147,6 @@ fi
 %files -n libsecurity-server-client-devel
 %defattr(-,root,root,-)
 %{_libdir}/libsecurity-server-client.so
+%{_libdir}/libsecurity-server-commons.so
 /usr/include/security-server/security-server.h
 %{_libdir}/pkgconfig/*.pc
