@@ -16,10 +16,10 @@
  *  limitations under the License
  */
 /*
- * @file        data-share.cpp
- * @author      Bartlomiej Grzelewski (b.grzelewski@samsung.com)
+ * @file        privilege-by-pid.cpp
+ * @author      Jan Cybulski (j.cybulski@samsung.com)
  * @version     1.0
- * @brief       Implementation of api-data-share service.
+ * @brief       Implementation of check-privilege-by-pid service.
  */
 
 #include <sys/smack.h>
@@ -28,10 +28,14 @@
 #include <dpl/serialization.h>
 
 #include <protocols.h>
-#include <data-share.h>
+#include <privilege-by-pid.h>
+
 #include <security-server.h>
 #include <security-server-util.h>
 #include <smack-check.h>
+
+#include <privilege-control.h>
+
 
 namespace {
 // Service may open more than one socket.
@@ -53,39 +57,41 @@ const int SERVICE_SOCKET_ID = 0;
 
 namespace SecurityServer {
 
-GenericSocketService::ServiceDescriptionVector SharedMemoryService::GetServiceDescription() {
+GenericSocketService::ServiceDescriptionVector PrivilegeByPidService::GetServiceDescription() {
     ServiceDescription sd = {
-        "security-server::api-data-share",
+        "*",
         SERVICE_SOCKET_ID,
-        SERVICE_SOCKET_SHARED_MEMORY
+        SERVICE_SOCKET_PRIVILEGE_BY_PID
     };
     ServiceDescriptionVector v;
     v.push_back(sd);
     return v;
 }
 
-void SharedMemoryService::accept(const AcceptEvent &event) {
+void PrivilegeByPidService::accept(const AcceptEvent &event) {
     LogDebug("Accept event. ConnectionID.sock: " << event.connectionID.sock
         << " ConnectionID.counter: " << event.connectionID.counter
         << " ServiceID: " << event.interfaceID);
 }
 
-void SharedMemoryService::write(const WriteEvent &event) {
+void PrivilegeByPidService::write(const WriteEvent &event) {
     LogDebug("WriteEvent. ConnectionID: " << event.connectionID.sock <<
         " Size: " << event.size << " Left: " << event.left);
     if (event.left == 0)
         m_serviceManager->Close(event.connectionID);
 }
 
-bool SharedMemoryService::readOne(const ConnectionID &conn, SocketBuffer &buffer) {
+bool PrivilegeByPidService::readOne(const ConnectionID &conn, SocketBuffer &buffer) {
     LogDebug("Iteration begin");
-    static const char * const revoke = "-----";
-    static const char * const permissions = "rwxat";
-    char *providerLabel = NULL;
-    std::string clientLabel;
-    int clientPid = 0;
+
+    int retval;
+    int pid;
+    std::string object;
+    std::string access_rights;
+
+
     int retCode = SECURITY_SERVER_API_ERROR_SERVER_ERROR;
-    struct smack_accesses *smack = NULL;
+
 
     if (!buffer.Ready()) {
         return false;
@@ -93,50 +99,46 @@ bool SharedMemoryService::readOne(const ConnectionID &conn, SocketBuffer &buffer
 
     Try {
         SecurityServer::Deserialization des;
-        des.Deserialize(buffer, clientLabel);
-        des.Deserialize(buffer, clientPid);
-     } Catch (SocketBuffer::Exception::Base) {
+        des.Deserialize(buffer, pid);
+        des.Deserialize(buffer, object);
+        des.Deserialize(buffer, access_rights);
+    } Catch (SocketBuffer::Exception::Base) {
         LogDebug("Broken protocol. Closing socket.");
         m_serviceManager->Close(conn);
         return false;
     }
 
     if (smack_check()) {
-        if (0 != smack_new_label_from_socket(conn.sock, &providerLabel)) {
-            LogDebug("Error in smack_new_label_from_socket");
-            retCode = SECURITY_SERVER_API_ERROR_BAD_REQUEST;
-            goto end;
-        }
+        char subject[SMACK_LABEL_LEN + 1];
+        subject[0]='\0';
+        retval = smack_pid_have_access(pid, object.c_str(), access_rights.c_str());
+        LogDebug("smack_pid_have_access returned " << retval);
 
-        if (!util_smack_label_is_valid(clientLabel.c_str())) {
-            LogDebug("Invalid smack label: " << clientLabel);
-            retCode = SECURITY_SERVER_API_ERROR_BAD_REQUEST;
-            goto end;
+        if (get_smack_label_from_process(pid, subject) != PC_OPERATION_SUCCESS) {
+            // subject label is set to empty string
+            LogError("get_smack_label_from_process failed. Subject label has not been read.");
+        } else {
+            SECURE_SLOGD("Subject label of client PID %d is: %s", pid, subject);
         }
-
-        if (smack_accesses_new(&smack)) {
-            LogDebug("Error in smack_accesses_new");
-            goto end;
-        }
-
-        if (smack_accesses_add_modify(smack, clientLabel.c_str(), providerLabel,
-              permissions, revoke))
-        {
-            LogDebug("Error in smack_accesses_add_modify");
-            goto end;
-        }
-
-        if (smack_accesses_apply(smack)) {
-            LogDebug("Error in smack_accesses_apply");
-            retCode = SECURITY_SERVER_API_ERROR_ACCESS_DENIED;
-            goto end;
-        }
-        LogDebug("Access granted. Subject: " << clientLabel << " Provider: " << providerLabel);
+    } else {
+        LogDebug("SMACK is not available. Subject label has not been read.");
+        retval = 1;
     }
-    retCode = SECURITY_SERVER_API_SUCCESS;
-end:
-    free(providerLabel);
-    smack_accesses_free(smack);
+
+    char *path = read_exe_path_from_proc(pid);
+
+    if (retval > 0)
+        SECURE_SLOGD("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=%s, result=%d, caller_path=%s", pid, subject, object, access_rights, retval, path);
+    else
+        SECURE_SLOGW("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=%s, result=%d, caller_path=%s", pid, subject, object, access_rights, retval, path);
+
+    if (path != NULL)
+        free(path);
+
+    if (retval == 1)   //there is permission
+        retCode = SECURITY_SERVER_API_SUCCESS;
+    else                //there is no permission
+        retCode = SECURITY_SERVER_API_ERROR_ACCESS_DENIED;
 
     SecurityServer::Serialization ser;
     SocketBuffer sendBuffer;
@@ -145,7 +147,7 @@ end:
     return true;
 }
 
-void SharedMemoryService::read(const ReadEvent &event) {
+void PrivilegeByPidService::read(const ReadEvent &event) {
     LogDebug("Read event for counter: " << event.connectionID.counter);
     auto &buffer = m_socketBufferMap[event.connectionID.counter];
     buffer.Push(event.rawBuffer);
@@ -155,12 +157,12 @@ void SharedMemoryService::read(const ReadEvent &event) {
     while(readOne(event.connectionID, buffer));
 }
 
-void SharedMemoryService::close(const CloseEvent &event) {
+void PrivilegeByPidService::close(const CloseEvent &event) {
     LogDebug("CloseEvent. ConnectionID: " << event.connectionID.sock);
     m_socketBufferMap.erase(event.connectionID.counter);
 }
 
-void SharedMemoryService::error(const ErrorEvent &event) {
+void PrivilegeByPidService::error(const ErrorEvent &event) {
     LogDebug("ErrorEvent. ConnectionID: " << event.connectionID.sock);
     m_serviceManager->Close(event.connectionID);
 }

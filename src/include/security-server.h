@@ -23,6 +23,7 @@
 #define SECURITY_SERVER_H
 
 #include <sys/types.h>
+#include <privilege-control.h>
 
 /**
  * @file    security-server.h
@@ -125,9 +126,13 @@
 /*! \brief   indicating password retry timeout is not occurred yet  */
 #define SECURITY_SERVER_API_ERROR_PASSWORD_REUSED -20
 
+/*! \brief   indicating password is empty  */
+#define SECURITY_SERVER_API_ERROR_PASSWORD_EMPTY -21
+
 /*! \brief   indicating the error with unknown reason */
 #define SECURITY_SERVER_API_ERROR_UNKNOWN -255
 /** @}*/
+
 
 #ifdef __cplusplus
 extern "C" {
@@ -912,78 +917,6 @@ int security_server_chk_pwd(const char *challenge,
 */
 int security_server_set_pwd_history(int number_of_history);
 
-
-
-/**
- * \par Description:
- * This API launches /usr/bin/debug-util as root privilege.
- *
- * \par Purpose:
- * This API will be used only by SDK with developer privilege to launch debugging tool to debug as the developing applicaion's privilege.
- *
- * \par Typical use case:
- * During appliation development, SDK opens a shell to install, launch, and debug the developing application. But the shell will not have any privilege to control platform. Therefore we need a special utility to manage debugging environement as same privilege level of the application. If this API is called, security server will launch the debug utility as root privilege and the utility will drop its privilege same as developing application
- *
- *
- * \par Method of function operation:
- * When Security Server receives this request, it checks uid of the client, and launches /usr/bin/debug-util with given arguements.
- *
- * \par Sync (or) Async:
- * This is a Synchronous API.
- *
- * \par Important notes:
- * Caller process of this API must be owned by developer user.\n
- * The caller process will be pre-defined.
- * /usr/bin/debug-util itself must be omitted in the argv. Security server will put this as first argv in the execution procedure
- *
- * \param[in] argc Number of arguements.
- *
- * \param[in] argv Arguements
- *
- * \return 0 on success, negative integer error code on error.
- *
- * \par Prospective clients:
- * Only pre-defiend debugging utility.
- *
- * \par Known issues/bugs:
- * None
- *
- * \pre None
- *
- * \post None
- *
- * \see None
- *
- * \remarks Calling this API, you have to put argv[1] of the debug-util as argv[0] of this API. Security server will put argv[0] automatically
- *
- * \par Sample code:
- * \code
- * #include <security-server.h>
- * #define DEVELOPER_UID 5500
- *
- * int main(int argc, char **argv)
- * {
- *      int my_uid, ret;
- *      uid = getuid();
- *      if(uid != DEVELOPER_UID)
- *      {
- *              // You must be developer user
- *              exit(1);
- *      }
- *
- *      ret = security_server_launch_debug_tool(argc -1, argv++)
- *      if(ret != SECURITY_SERVER_SUCCESS)
- *      {
- *              // Some error occurred
- *              exit(1);
- *      }
- *      ...
- * }
- *
- * \endcode
-*/
-int security_server_launch_debug_tool(int argc, const char **argv);
-
 /*
  * This function allows to get process SMACK label by passing cookie assigned
  * to process. Function returns pointer to allocated buffer with label.
@@ -1032,6 +965,30 @@ int security_server_app_give_access(const char *customer_label, int customer_pid
  * SECURITY_SERVER_SUCCESS - on succes
  */
 int security_server_check_privilege_by_pid(int pid, const char *object, const char *access_rights);
+
+/*
+ * This function allows middleware to enable permissions for specified app_id.
+ *
+ * \param[in] Application ID
+ * \param[in] Application type definet in enum at the beginning of this file
+ * \param[in] Permissions list
+ * \param[in] Persistent
+ *
+ * \return SECURITY_SERVER_SUCCESS on success or error code on fail
+ */
+int security_server_app_enable_permissions(const char *app_id, app_type_t app_type, const char **perm_list, int persistent);
+
+/*
+ * This function allows middleware to disable permissions for specified app_id.
+ *
+ * \param[in] Application ID
+ * \param[in] Application type definet in enum at the beginning of this file
+ * \param[in] Permissions list
+ *
+ * \return SECURITY_SERVER_SUCCESS on success or error code on fail
+ */
+int security_server_app_disable_permissions(const char *app_id, app_type_t app_type, const char **perm_list);
+
 
 #ifdef __cplusplus
 }

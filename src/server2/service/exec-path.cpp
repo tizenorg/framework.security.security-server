@@ -16,19 +16,22 @@
  *  limitations under the License
  */
 /*
- * @file        data-share.cpp
- * @author      Bartlomiej Grzelewski (b.grzelewski@samsung.com)
+ * @file        exec-path.cpp
+ * @author      Zofia Abramowska (z.abramowska@samsung.com)
  * @version     1.0
- * @brief       Implementation of api-data-share service.
+ * @brief       Implementation of api-exec-path service.
  */
 
+#include <string>
+
+#include <unistd.h>
 #include <sys/smack.h>
 
 #include <dpl/log/log.h>
 #include <dpl/serialization.h>
 
 #include <protocols.h>
-#include <data-share.h>
+#include <exec-path.h>
 #include <security-server.h>
 #include <security-server-util.h>
 #include <smack-check.h>
@@ -53,39 +56,35 @@ const int SERVICE_SOCKET_ID = 0;
 
 namespace SecurityServer {
 
-GenericSocketService::ServiceDescriptionVector SharedMemoryService::GetServiceDescription() {
+GenericSocketService::ServiceDescriptionVector ExecPathService::GetServiceDescription() {
     ServiceDescription sd = {
-        "security-server::api-data-share",
+        "security-server",
         SERVICE_SOCKET_ID,
-        SERVICE_SOCKET_SHARED_MEMORY
+        SERVICE_SOCKET_EXEC_PATH
     };
     ServiceDescriptionVector v;
     v.push_back(sd);
     return v;
 }
 
-void SharedMemoryService::accept(const AcceptEvent &event) {
+void ExecPathService::accept(const AcceptEvent &event) {
     LogDebug("Accept event. ConnectionID.sock: " << event.connectionID.sock
         << " ConnectionID.counter: " << event.connectionID.counter
         << " ServiceID: " << event.interfaceID);
 }
 
-void SharedMemoryService::write(const WriteEvent &event) {
+void ExecPathService::write(const WriteEvent &event) {
     LogDebug("WriteEvent. ConnectionID: " << event.connectionID.sock <<
         " Size: " << event.size << " Left: " << event.left);
     if (event.left == 0)
         m_serviceManager->Close(event.connectionID);
 }
 
-bool SharedMemoryService::readOne(const ConnectionID &conn, SocketBuffer &buffer) {
-    LogDebug("Iteration begin");
-    static const char * const revoke = "-----";
-    static const char * const permissions = "rwxat";
-    char *providerLabel = NULL;
-    std::string clientLabel;
-    int clientPid = 0;
-    int retCode = SECURITY_SERVER_API_ERROR_SERVER_ERROR;
-    struct smack_accesses *smack = NULL;
+bool ExecPathService::processOne(const ConnectionID &conn, SocketBuffer &buffer) {
+    LogDebug("Processing message");
+
+    int pid = 0;
+    char *exe;
 
     if (!buffer.Ready()) {
         return false;
@@ -93,74 +92,56 @@ bool SharedMemoryService::readOne(const ConnectionID &conn, SocketBuffer &buffer
 
     Try {
         SecurityServer::Deserialization des;
-        des.Deserialize(buffer, clientLabel);
-        des.Deserialize(buffer, clientPid);
+        des.Deserialize(buffer, pid);
      } Catch (SocketBuffer::Exception::Base) {
         LogDebug("Broken protocol. Closing socket.");
         m_serviceManager->Close(conn);
         return false;
     }
 
-    if (smack_check()) {
-        if (0 != smack_new_label_from_socket(conn.sock, &providerLabel)) {
-            LogDebug("Error in smack_new_label_from_socket");
-            retCode = SECURITY_SERVER_API_ERROR_BAD_REQUEST;
-            goto end;
-        }
-
-        if (!util_smack_label_is_valid(clientLabel.c_str())) {
-            LogDebug("Invalid smack label: " << clientLabel);
-            retCode = SECURITY_SERVER_API_ERROR_BAD_REQUEST;
-            goto end;
-        }
-
-        if (smack_accesses_new(&smack)) {
-            LogDebug("Error in smack_accesses_new");
-            goto end;
-        }
-
-        if (smack_accesses_add_modify(smack, clientLabel.c_str(), providerLabel,
-              permissions, revoke))
-        {
-            LogDebug("Error in smack_accesses_add_modify");
-            goto end;
-        }
-
-        if (smack_accesses_apply(smack)) {
-            LogDebug("Error in smack_accesses_apply");
-            retCode = SECURITY_SERVER_API_ERROR_ACCESS_DENIED;
-            goto end;
-        }
-        LogDebug("Access granted. Subject: " << clientLabel << " Provider: " << providerLabel);
-    }
-    retCode = SECURITY_SERVER_API_SUCCESS;
-end:
-    free(providerLabel);
-    smack_accesses_free(smack);
-
     SecurityServer::Serialization ser;
     SocketBuffer sendBuffer;
-    ser.Serialize(sendBuffer, retCode);
+    int retVal;
+
+    // get executable path
+    exe = read_exe_path_from_proc(pid);
+    // quickly getting rid of allocated memory
+    // when read_exe_path_from_proc will rewritten this won't be required
+    std::string exec_path(exe ? exe : "");
+    free(exe);
+
+    if (exec_path.empty())
+    {
+         LogError("Server: Failed to read executable path for pid " << pid);
+         retVal = SECURITY_SERVER_API_ERROR_SERVER_ERROR;
+         ser.Serialize(sendBuffer, retVal);
+         m_serviceManager->Write(conn, sendBuffer.Pop());
+         return true;
+    }
+
+    retVal = SECURITY_SERVER_API_SUCCESS;
+    ser.Serialize(sendBuffer, retVal);
+    ser.Serialize(sendBuffer, exec_path);
     m_serviceManager->Write(conn, sendBuffer.Pop());
     return true;
 }
 
-void SharedMemoryService::read(const ReadEvent &event) {
+void ExecPathService::read(const ReadEvent &event) {
     LogDebug("Read event for counter: " << event.connectionID.counter);
     auto &buffer = m_socketBufferMap[event.connectionID.counter];
     buffer.Push(event.rawBuffer);
 
     // We can get several requests in one package.
     // Extract and process them all
-    while(readOne(event.connectionID, buffer));
+    while(processOne(event.connectionID, buffer));
 }
 
-void SharedMemoryService::close(const CloseEvent &event) {
+void ExecPathService::close(const CloseEvent &event) {
     LogDebug("CloseEvent. ConnectionID: " << event.connectionID.sock);
     m_socketBufferMap.erase(event.connectionID.counter);
 }
 
-void SharedMemoryService::error(const ErrorEvent &event) {
+void ExecPathService::error(const ErrorEvent &event) {
     LogDebug("ErrorEvent. ConnectionID: " << event.connectionID.sock);
     m_serviceManager->Close(event.connectionID);
 }

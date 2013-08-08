@@ -1,15 +1,12 @@
 #sbs-git:slp/pkgs/s/security-server security-server 0.0.37
 Name:       security-server
 Summary:    Security server and utilities
-Version:    0.0.78
+Version:    0.0.79
 Release:    1
 Group:      TO_BE/FILLED_IN
 License:    Apache License, Version 2.0
 URL:        N/A
 Source0:    %{name}-%{version}.tar.gz
-Source1:    security-server.manifest
-Source2:    libsecurity-server-client.manifest
-Source3:    security-server.service
 BuildRequires: cmake
 BuildRequires: zip
 BuildRequires: pkgconfig(dlog)
@@ -20,6 +17,8 @@ Requires(preun):  systemd
 Requires(post):   systemd
 Requires(postun): systemd
 BuildRequires: pkgconfig(libprivilege-control)
+BuildRequires: pkgconfig(libsystemd-daemon)
+%{?systemd_requires}
 
 %description
 Security server and utilities
@@ -34,27 +33,11 @@ Requires(postun): /sbin/ldconfig
 %description -n libsecurity-server-client
 Security server package (client)
 
-#%package -n wrt-security
-#Summary:    wrt-security-daemon and client libraries.
-#Group:      Development/Libraries
-#Requires(post): /sbin/ldconfig
-#Requires(postun): /sbin/ldconfig
-#
-#%description -n wrt-security
-#Wrt-security-daemon and client libraries.
-#
-#%package -n wrt-security-devel
-#Summary:    Header files for client libraries.
-#Group:      Development/Libraries
-#Requires:   wrt-security = %{version}-%{release}
-#
-#%description -n wrt-security-devel
-#Developer files for client libraries.
-
 %package -n libsecurity-server-client-devel
 Summary:    Security server (client-devel)
 Group:      Development/Libraries
 Requires:   libsecurity-server-client = %{version}-%{release}
+Requires:   libprivilege-control-devel
 
 %description -n libsecurity-server-client-devel
 Security server package (client-devel)
@@ -82,10 +65,9 @@ Certificates for wrt.
 export LDFLAGS+="-Wl,--rpath=%{_libdir}"
 
 %cmake . -DVERSION=%{version} \
-        -DCMAKE_BUILD_TYPE=RELEASE \
+        -DCMAKE_BUILD_TYPE=%{?build_type:%build_type}%{!?build_type:RELEASE} \
         -DCMAKE_VERBOSE_MAKEFILE=OFF
 make %{?jobs:-j%jobs}
-
 
 %install
 rm -rf %{buildroot}
@@ -93,35 +75,34 @@ mkdir -p %{buildroot}/usr/share/license
 cp LICENSE %{buildroot}/usr/share/license/%{name}
 cp LICENSE %{buildroot}/usr/share/license/libsecurity-server-client
 %make_install
-install -D %{SOURCE1} %{buildroot}%{_datadir}/security-server.manifest
-install -D %{SOURCE2} %{buildroot}%{_datadir}/libsecurity-server-client.manifest
 
 mkdir -p %{buildroot}/usr/lib/systemd/system/multi-user.target.wants
-install -m 0644 %{SOURCE3} %{buildroot}/usr/lib/systemd/system/security-server.service
+mkdir -p %{buildroot}/usr/lib/systemd/system/sockets.target.wants
 ln -s ../security-server.service %{buildroot}/usr/lib/systemd/system/multi-user.target.wants/security-server.service
+ln -s ../security-server.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server.socket
+ln -s ../security-server-data-share.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server-data-share.socket
+ln -s ../security-server-get-gid.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server-get-gid.socket
+ln -s ../security-server-privilege-by-pid.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server-privilege-by-pid.socket
+ln -s ../security-server-exec-path.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server-exec-path.socket
+ln -s ../security-server-get-object-name.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server-get-object-name.socket
+ln -s ../security-server-app-permissions.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server-app-permissions.socket
 
-
-%preun
-if [ $1 == 0 ]; then
-    systemctl stop security-server.service
-fi
+%clean
+rm -rf %{buildroot}
 
 %post
 systemctl daemon-reload
-if [ $1 == 1 ]; then
+if [ "$1" = 1 ]; then
     systemctl restart security-server.service
 fi
-mkdir -p /etc/rc.d/rc3.d
-mkdir -p /etc/rc.d/rc5.d
-ln -sf /etc/rc.d/init.d/security-serverd /etc/rc.d/rc3.d/S10security-server
-ln -sf /etc/rc.d/init.d/security-serverd /etc/rc.d/rc5.d/S10security-server
+
+%preun
+if [ "$1" = 0 ]; then
+    systemctl stop security-server.service
+fi
 
 %postun
 systemctl daemon-reload
-if [ "$1" = 0 ]; then
-    rm -f /etc/rc.d/rc3.d/S10security-server
-    rm -f /etc/rc.d/rc5.d/S10security-server
-fi
 
 %post -n libsecurity-server-client -p /sbin/ldconfig
 
@@ -129,12 +110,24 @@ fi
 
 %files -n security-server
 %manifest %{_datadir}/security-server.manifest
-%defattr(-,root,root,-)
-/usr/lib/systemd/system/multi-user.target.wants/security-server.service
-/usr/lib/systemd/system/security-server.service
-%attr(755,root,root) /etc/rc.d/init.d/security-serverd
 %attr(755,root,root) /usr/bin/security-server
 %{_libdir}/libsecurity-server-commons.so.*
+%attr(-,root,root) /usr/lib/systemd/system/multi-user.target.wants/security-server.service
+%attr(-,root,root) /usr/lib/systemd/system/security-server.service
+%attr(-,root,root) /usr/lib/systemd/system/sockets.target.wants/security-server.socket
+%attr(-,root,root) /usr/lib/systemd/system/security-server.socket
+%attr(-,root,root) /usr/lib/systemd/system/sockets.target.wants/security-server-data-share.socket
+%attr(-,root,root) /usr/lib/systemd/system/security-server-data-share.socket
+%attr(-,root,root) /usr/lib/systemd/system/sockets.target.wants/security-server-get-gid.socket
+%attr(-,root,root) /usr/lib/systemd/system/security-server-get-gid.socket
+%attr(-,root,root) /usr/lib/systemd/system/sockets.target.wants/security-server-privilege-by-pid.socket
+%attr(-,root,root) /usr/lib/systemd/system/security-server-privilege-by-pid.socket
+%attr(-,root,root) /usr/lib/systemd/system/sockets.target.wants/security-server-exec-path.socket
+%attr(-,root,root) /usr/lib/systemd/system/security-server-exec-path.socket
+%attr(-,root,root) /usr/lib/systemd/system/sockets.target.wants/security-server-get-object-name.socket
+%attr(-,root,root) /usr/lib/systemd/system/security-server-get-object-name.socket
+%attr(-,root,root) /usr/lib/systemd/system/sockets.target.wants/security-server-app-permissions.socket
+%attr(-,root,root) /usr/lib/systemd/system/security-server-app-permissions.socket
 
 %{_datadir}/license/%{name}
 

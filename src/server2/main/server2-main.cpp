@@ -32,6 +32,11 @@
 #include <socket-manager.h>
 
 #include <data-share.h>
+#include <get-gid.h>
+#include <privilege-by-pid.h>
+#include <exec-path.h>
+#include <get-object-name.h>
+#include <app-permissions.h>
 #include <echo.h>
 
 IMPLEMENT_SAFE_SINGLETON(SecurityServer::Log::LogSystem);
@@ -51,6 +56,26 @@ int server2(void) {
         SecurityServer::SharedMemoryService *shmService = new SecurityServer::SharedMemoryService;
         shmService->Create();
         manager.RegisterSocketService(shmService);
+
+        SecurityServer::GetGidService *getGidService = new SecurityServer::GetGidService;
+        getGidService->Create();
+        manager.RegisterSocketService(getGidService);
+
+        SecurityServer::PrivilegeByPidService *privByPidService = new SecurityServer::PrivilegeByPidService;
+        privByPidService->Create();
+        manager.RegisterSocketService(privByPidService);
+        
+        SecurityServer::ExecPathService *execService = new SecurityServer::ExecPathService;
+        execService->Create();
+        manager.RegisterSocketService(execService);
+
+        SecurityServer::GetObjectNameService *getObjectNameService = new SecurityServer::GetObjectNameService;
+        getObjectNameService->Create();
+        manager.RegisterSocketService(getObjectNameService);
+
+        SecurityServer::AppPermissionsService *appEnablePermissionsService = new SecurityServer::AppPermissionsService;
+        appEnablePermissionsService->Create();
+        manager.RegisterSocketService(appEnablePermissionsService);
 
         manager.MainLoop();
     }

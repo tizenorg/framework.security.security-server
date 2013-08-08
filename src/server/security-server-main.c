@@ -42,8 +42,6 @@
 #include <server2-main.h>
 
 #include <privilege-control.h>
-#include <security-server-system-observer.h>
-#include <security-server-rules-revoker.h>
 
 #include "security-server-cookie.h"
 #include "security-server-common.h"
@@ -70,8 +68,6 @@ struct security_server_thread_param {
     int server_sockfd;
     int thread_status;
 };
-
-static int netlink_enabled = 1; /* prevent memory leaks when netlink is disabled */
 
 
 /************************************************************************************************/
@@ -115,105 +111,6 @@ void print_cookie(cookie_list *list)
 }
 #endif
 
-char *read_exe_path_from_proc(pid_t pid)
-{
-    char link[32];
-    char *exe = NULL;
-    size_t size = 64;
-    ssize_t cnt = 0;
-
-    // get link to executable
-    snprintf(link, sizeof(link), "/proc/%d/exe", pid);
-
-    for (;;)
-    {
-        exe = malloc(size);
-        if (exe == NULL)
-        {
-            SEC_SVR_ERR("Out of memory");
-            return NULL;
-        }
-
-        // read link target
-        cnt = readlink(link, exe, size);
-
-        // error
-        if (cnt < 0 || (size_t) cnt > size)
-        {
-            SEC_SVR_ERR("Can't locate process binary for pid[%d]", pid);
-            free(exe);
-            return NULL;
-        }
-
-        // read less than requested
-        if ((size_t) cnt < size)
-            break;
-
-        // read exactly the number of bytes requested
-        free(exe);
-        if (size > (SIZE_MAX >> 1))
-        {
-            SEC_SVR_ERR("Exe path too long (more than %d characters)", size);
-            return NULL;
-        }
-        size <<= 1;
-    }
-    // readlink does not append null byte to buffer.
-    exe[cnt] = '\0';
-    return exe;
-}
-
-/*
- * Function that checks if API caller have access to specified label.
- * In positive case (caller has access to the API) returns 1.
- * In case of no access returns 0, and -1 in case of error.
- */
-int authorize_SS_API_caller_socket(int sockfd, char *required_API_label, char *required_rule)
-{
-    int retval;
-    char *label = NULL;
-    char *path = NULL;
-    //for getting socket options
-    struct ucred cr;
-    unsigned int len;
-
-    SEC_SVR_DBG("Checking client SMACK access to SS API");
-
-    if (!smack_check()) {
-        SEC_SVR_ERR("No SMACK on device found, API PROTECTION DISABLED!!!");
-        retval = 1;
-        goto end;
-    }
-
-    retval = smack_new_label_from_socket(sockfd, &label);
-    if (retval != 0) {
-        SEC_SVR_ERR("%s", "Error in getting label from socket");
-        retval = -1;
-        goto end;
-    }
-
-    len = sizeof(cr);
-    retval = getsockopt(sockfd, SOL_SOCKET, SO_PEERCRED, &cr, &len);
-    if (retval < 0)
-        SEC_SVR_ERR("Error in getsockopt() and getting binary path");
-    else
-        path = read_exe_path_from_proc(cr.pid);
-
-    retval = smack_have_access(label, required_API_label, required_rule);
-
-    //some log in SMACK format
-    if (retval > 0)
-        SECURE_LOGD("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=%s, result=%d, caller_path=%s", cr.pid, label, required_API_label, required_rule, retval, path);
-    else
-        SECURE_LOGW("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=%s, result=%d, caller_path=%s", cr.pid, label, required_API_label, required_rule, retval, path);
-end:
-    if (path != NULL)
-        free(path);
-    if (label != NULL)
-        free(label);
-
-    return retval;
-}
 
 /* Object name is actually name of a Group ID *
  * This function opens /etc/group file and search group ID and
@@ -401,91 +298,6 @@ static void security_server_sig_child(int signo, siginfo_t *info, void *data)
     return;
 }
 
-/* Execute a debugging tool by fork() and execve() */
-int execute_debug_tool(int argc, char*const *argv, int server_sockfd, int client_sockfd)
-{
-    int ret, i;
-    SEC_SVR_DBG("%s", "Executing tool");
-
-    (void)argc;
-
-    ret = fork();
-    if (ret == 0)
-    {
-        close(client_sockfd);
-        close(server_sockfd);
-        setsid();
-
-        for (i = 0; i < _NSIG; i++)
-            signal(i, SIG_DFL);
-
-        ret = execv(argv[0], argv);
-        if (ret == -1)
-        {
-            SEC_SVR_ERR("Error:Failed to execute [%d]", errno);
-            exit(-1);
-        }
-    }
-    if (ret < 0)
-    {
-        SEC_SVR_ERR("Error: Failed to fork [%d]", errno);
-        return SECURITY_SERVER_ERROR_SERVER_ERROR;
-    }
-    return SECURITY_SERVER_SUCCESS;
-}
-
-/* Authenticate the application is middleware daemon
- * The middleware must run as root and the cmd line must be pre listed */
-int authenticate_developer_shell(int sockfd)
-{
-    int retval = SECURITY_SERVER_ERROR_AUTHENTICATION_FAILED;
-    struct ucred cr;
-    unsigned int cl = sizeof(cr);
-    char *exe = NULL;
-
-    /* get PID of socket peer */
-    if (getsockopt(sockfd, SOL_SOCKET, SO_PEERCRED, &cr, &cl) != 0)
-    {
-        retval = SECURITY_SERVER_ERROR_SOCKET;
-        SEC_SVR_ERR("%s", "Error on getsockopt");
-        goto error;
-    }
-
-    /* All middlewares will run as root */
-    if (cr.uid != SECURITY_SERVER_DEVELOPER_UID)
-    {
-        retval = SECURITY_SERVER_ERROR_AUTHENTICATION_FAILED;
-        SEC_SVR_ERR("Non root process has called API: %d", cr.uid);
-        goto error;
-    }
-
-    /* Read executable path of the PID from proc fs */
-    exe = read_exe_path_from_proc(cr.pid);
-    if (exe == NULL)
-    {
-        /* It's weired. no file in proc file system, */
-        retval = SECURITY_SERVER_ERROR_FILE_OPERATION;
-        SEC_SVR_ERR("Error on opening /proc/%d/exe", cr.pid);
-        goto error;
-    }
-
-    /* Search exe of the peer that is really debug tool */
-    if (strcmp(exe, SECURITY_SERVER_DEBUG_TOOL_PATH) != 0)
-    {
-        SEC_SVR_ERR("Error: Wrong exe path [%s]", exe);
-        retval = SECURITY_SERVER_ERROR_AUTHENTICATION_FAILED;
-        goto error;
-    }
-    retval = SECURITY_SERVER_SUCCESS;
-    SEC_SVR_DBG("%s", "Client Authenticated");
-
-error:
-    if (exe != NULL)
-        free(exe);
-
-    return retval;
-}
-
 int process_cookie_request(int sockfd)
 {
     int retval, client_pid, client_uid;
@@ -556,7 +368,7 @@ int process_cookie_request(int sockfd)
     {
         SEC_SVR_ERR("ERROR: Cannot send generic response: %d", retval);
     }
-    SEC_SVR_DBG("Server: Cookie created for client PID %d LABEL >%s<",
+    SECURE_SLOGD("Server: Cookie created for client PID %d LABEL >%s<",
         cookie_pid, cookie_label);
 
     SEC_SVR_DBG("%s", "Server: Cookie has been sent to client");
@@ -722,82 +534,82 @@ error:
     return retval;
 }
 
-int process_object_name_request(int sockfd)
-{
-    int retval, client_pid, requested_privilege;
-    char object_name[SECURITY_SERVER_MAX_OBJ_NAME];
+// int process_object_name_request(int sockfd)
+// {
+//     int retval, client_pid, requested_privilege;
+//     char object_name[SECURITY_SERVER_MAX_OBJ_NAME];
 
-    /* Authenticate client */
-    retval = authenticate_client_middleware(sockfd, &client_pid);
-    if (retval != SECURITY_SERVER_SUCCESS)
-    {
-        SEC_SVR_ERR("%s", "Client Authentication Failed");
-        retval = send_generic_response(sockfd,
-            SECURITY_SERVER_MSG_TYPE_OBJECT_NAME_RESPONSE,
-            SECURITY_SERVER_RETURN_CODE_AUTHENTICATION_FAILED);
-        if (retval != SECURITY_SERVER_SUCCESS)
-        {
-            SEC_SVR_ERR("ERROR: Cannot send generic response: %d", retval);
-        }
-        goto error;
-    }
+//     /* Authenticate client */
+//     retval = authenticate_client_middleware(sockfd, &client_pid);
+//     if (retval != SECURITY_SERVER_SUCCESS)
+//     {
+//         SEC_SVR_ERR("%s", "Client Authentication Failed");
+//         retval = send_generic_response(sockfd,
+//             SECURITY_SERVER_MSG_TYPE_OBJECT_NAME_RESPONSE,
+//             SECURITY_SERVER_RETURN_CODE_AUTHENTICATION_FAILED);
+//         if (retval != SECURITY_SERVER_SUCCESS)
+//         {
+//             SEC_SVR_ERR("ERROR: Cannot send generic response: %d", retval);
+//         }
+//         goto error;
+//     }
 
-    /* Receive GID */
-    retval = TEMP_FAILURE_RETRY(read(sockfd, &requested_privilege, sizeof(requested_privilege)));
-    if (retval < (int)sizeof(requested_privilege))
-    {
-        SEC_SVR_ERR("%s", "Receiving request failed");
-        retval = send_generic_response(sockfd,
-            SECURITY_SERVER_MSG_TYPE_OBJECT_NAME_RESPONSE,
-            SECURITY_SERVER_RETURN_CODE_BAD_REQUEST);
-        if (retval != SECURITY_SERVER_SUCCESS)
-        {
-            SEC_SVR_ERR("ERROR: Cannot send generic response: %d", retval);
-        }
-        goto error;
-    }
+//     /* Receive GID */
+//     retval = TEMP_FAILURE_RETRY(read(sockfd, &requested_privilege, sizeof(requested_privilege)));
+//     if (retval < (int)sizeof(requested_privilege))
+//     {
+//         SEC_SVR_ERR("%s", "Receiving request failed");
+//         retval = send_generic_response(sockfd,
+//             SECURITY_SERVER_MSG_TYPE_OBJECT_NAME_RESPONSE,
+//             SECURITY_SERVER_RETURN_CODE_BAD_REQUEST);
+//         if (retval != SECURITY_SERVER_SUCCESS)
+//         {
+//             SEC_SVR_ERR("ERROR: Cannot send generic response: %d", retval);
+//         }
+//         goto error;
+//     }
 
-    /* Search from /etc/group */
-    retval = search_object_name(requested_privilege,
-        object_name,
-        SECURITY_SERVER_MAX_OBJ_NAME);
-    if (retval == SECURITY_SERVER_ERROR_NO_SUCH_OBJECT)
-    {
-        /* It's not exist */
-        SEC_SVR_ERR("There is no such object for gid [%d]", requested_privilege);
-        retval = send_generic_response(sockfd,
-            SECURITY_SERVER_MSG_TYPE_OBJECT_NAME_RESPONSE,
-            SECURITY_SERVER_RETURN_CODE_NO_SUCH_OBJECT);
-        if (retval != SECURITY_SERVER_SUCCESS)
-        {
-            SEC_SVR_ERR("ERROR: Cannot send generic response: %d", retval);
-        }
-        goto error;
-    }
-    if (retval != SECURITY_SERVER_SUCCESS)
-    {
-        /* Error occurred */
-        SEC_SVR_ERR("Error on searching object name [%d]", retval);
-        retval = send_generic_response(sockfd,
-            SECURITY_SERVER_MSG_TYPE_OBJECT_NAME_RESPONSE,
-            SECURITY_SERVER_RETURN_CODE_SERVER_ERROR);
-        if (retval != SECURITY_SERVER_SUCCESS)
-        {
-            SEC_SVR_ERR("ERROR: Cannot send generic response: %d", retval);
-        }
-        goto error;
-    }
+//     /* Search from /etc/group */
+//     retval = search_object_name(requested_privilege,
+//         object_name,
+//         SECURITY_SERVER_MAX_OBJ_NAME);
+//     if (retval == SECURITY_SERVER_ERROR_NO_SUCH_OBJECT)
+//     {
+//         /* It's not exist */
+//         SEC_SVR_ERR("There is no such object for gid [%d]", requested_privilege);
+//         retval = send_generic_response(sockfd,
+//             SECURITY_SERVER_MSG_TYPE_OBJECT_NAME_RESPONSE,
+//             SECURITY_SERVER_RETURN_CODE_NO_SUCH_OBJECT);
+//         if (retval != SECURITY_SERVER_SUCCESS)
+//         {
+//             SEC_SVR_ERR("ERROR: Cannot send generic response: %d", retval);
+//         }
+//         goto error;
+//     }
+//     if (retval != SECURITY_SERVER_SUCCESS)
+//     {
+//         /* Error occurred */
+//         SEC_SVR_ERR("Error on searching object name [%d]", retval);
+//         retval = send_generic_response(sockfd,
+//             SECURITY_SERVER_MSG_TYPE_OBJECT_NAME_RESPONSE,
+//             SECURITY_SERVER_RETURN_CODE_SERVER_ERROR);
+//         if (retval != SECURITY_SERVER_SUCCESS)
+//         {
+//             SEC_SVR_ERR("ERROR: Cannot send generic response: %d", retval);
+//         }
+//         goto error;
+//     }
 
-    /* We found */
-    SECURE_LOGD("We found object: %s", object_name);
-    retval = send_object_name(sockfd, object_name);
-    if (retval != SECURITY_SERVER_SUCCESS)
-    {
-        SEC_SVR_ERR("ERROR: Cannot send generic response: %d", retval);
-    }
-error:
-    return retval;
-}
+//     /* We found */
+//     SECURE_SLOGD("We found object: %s", object_name);
+//     retval = send_object_name(sockfd, object_name);
+//     if (retval != SECURITY_SERVER_SUCCESS)
+//     {
+//         SEC_SVR_ERR("ERROR: Cannot send generic response: %d", retval);
+//     }
+// error:
+//     return retval;
+// }
 
 int process_gid_request(int sockfd, int msg_len)
 {
@@ -820,7 +632,7 @@ int process_gid_request(int sockfd, int msg_len)
     if (msg_len >= SECURITY_SERVER_MAX_OBJ_NAME)
     {
         /* Too big ojbect name */
-        SEC_SVR_ERR("%s", "Object name is too big");
+        SECURE_SLOGE("%s", "Object name is too big");
         retval = send_generic_response(sockfd,
             SECURITY_SERVER_MSG_TYPE_GID_RESPONSE,
             SECURITY_SERVER_RETURN_CODE_BAD_REQUEST);
@@ -835,7 +647,7 @@ int process_gid_request(int sockfd, int msg_len)
     retval = TEMP_FAILURE_RETRY(read(sockfd, object_name, msg_len));
     if (retval < msg_len)
     {
-        SECURE_LOGE("%s", "Failed to read object name");
+        SECURE_SLOGE("%s", "Failed to read object name");
         retval = send_generic_response(sockfd,
             SECURITY_SERVER_MSG_TYPE_GID_RESPONSE,
             SECURITY_SERVER_RETURN_CODE_BAD_REQUEST);
@@ -852,7 +664,7 @@ int process_gid_request(int sockfd, int msg_len)
     if (retval == SECURITY_SERVER_ERROR_NO_SUCH_OBJECT)
     {
         /* Not exist */
-        SECURE_LOGE("The object [%s] is not exist", object_name);
+        SECURE_SLOGD("The object [%s] is not exist", object_name);
         retval = send_generic_response(sockfd,
             SECURITY_SERVER_MSG_TYPE_GID_RESPONSE,
             SECURITY_SERVER_RETURN_CODE_NO_SUCH_OBJECT);
@@ -1033,7 +845,7 @@ int process_smack_request(int sockfd)
         /* We found */
         SEC_SVR_DBG("We found the cookie and pid:%d", search_result->pid);
         SEC_SVR_DBG("%s", "Cookie comparison succeeded. Access granted.");
-        SEC_SVR_DBG("Read label is: %s\n", label);
+        SECURE_SLOGD("Read label is: %s\n", label);
 
         retval = send_smack(sockfd, label);
 
@@ -1058,7 +870,7 @@ int process_smack_request(int sockfd)
 error:
     return retval;
 }
-
+#ifdef USE_SEC_SRV1_FOR_CHECK_PRIVILEGE_BY_PID
 int process_pid_privilege_check(int sockfd, int datasize)
 {
     //In this function we parsing received PID privilege check request
@@ -1110,7 +922,7 @@ int process_pid_privilege_check(int sockfd, int datasize)
             // subject label is set to empty string
             SEC_SVR_ERR("get_smack_label_from_process failed. Subject label has not been read.");
         } else {
-            SEC_SVR_DBG("Subject label of client PID %d is: %s", pid, subject);
+            SECURE_SLOGD("Subject label of client PID %d is: %s", pid, subject);
         }
     } else {
         SEC_SVR_DBG("SMACK is not available. Subject label has not been read.");
@@ -1120,9 +932,9 @@ int process_pid_privilege_check(int sockfd, int datasize)
     path = read_exe_path_from_proc(pid);
 
     if (retval > 0)
-        SECURE_LOGD("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=%s, result=%d, caller_path=%s", pid, subject, object, access_rights, retval, path);
+        SECURE_SLOGD("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=%s, result=%d, caller_path=%s", pid, subject, object, access_rights, retval, path);
     else
-        SECURE_LOGW("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=%s, result=%d, caller_path=%s", pid, subject, object, access_rights, retval, path);
+        SECURE_SLOGW("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=%s, result=%d, caller_path=%s", pid, subject, object, access_rights, retval, path);
 
     if (path != NULL)
         free(path);
@@ -1149,238 +961,8 @@ error:
 
     return retval;
 }
+#endif
 
-int process_tool_request(int client_sockfd, int server_sockfd)
-{
-    int retval, argcnum = 0;
-    char **recved_argv = NULL;
-
-    /* Authenticate client */
-    retval = authenticate_developer_shell(client_sockfd);
-    if (retval != SECURITY_SERVER_SUCCESS)
-    {
-        SEC_SVR_ERR("%s", "Client Authentication Failed");
-        retval = send_generic_response(client_sockfd,
-            SECURITY_SERVER_MSG_TYPE_TOOL_RESPONSE,
-            SECURITY_SERVER_RETURN_CODE_AUTHENTICATION_FAILED);
-        if (retval != SECURITY_SERVER_SUCCESS)
-        {
-            SEC_SVR_ERR("ERROR: Cannot send generic response: %d", retval);
-        }
-        goto error;
-    }
-
-    /* Receive Total number of argv */
-    retval = TEMP_FAILURE_RETRY(read(client_sockfd, &argcnum, sizeof(int)));
-    if ((retval < (int)sizeof(int)) || argcnum > (UINT_MAX / sizeof(char*)) - 2 || argcnum < 0)
-    {
-        SEC_SVR_ERR("Error: argc recieve failed: %d", retval);
-        retval = send_generic_response(client_sockfd,
-            SECURITY_SERVER_MSG_TYPE_TOOL_RESPONSE,
-            SECURITY_SERVER_RETURN_CODE_BAD_REQUEST);
-        if (retval != SECURITY_SERVER_SUCCESS)
-        {
-            SEC_SVR_ERR("ERROR: Cannot send generic response: %d", retval);
-        }
-        goto error;
-    }
-    argcnum += 2;
-    recved_argv = (char**)malloc(sizeof(char*) * argcnum);
-    if (recved_argv == NULL)
-    {
-        SEC_SVR_ERR("Error: malloc() failed: %d", retval);
-        retval = send_generic_response(client_sockfd,
-            SECURITY_SERVER_MSG_TYPE_TOOL_RESPONSE,
-            SECURITY_SERVER_RETURN_CODE_SERVER_ERROR);
-        if (retval != SECURITY_SERVER_SUCCESS)
-        {
-            SEC_SVR_ERR("ERROR: Cannot send generic response: %d", retval);
-        }
-        goto error;
-    }
-    memset(recved_argv, 0, sizeof(char*) * argcnum);
-
-    retval = recv_launch_tool_request(client_sockfd, argcnum - 1, recved_argv);
-    if (retval == SECURITY_SERVER_ERROR_RECV_FAILED || retval == SECURITY_SERVER_ERROR_OUT_OF_MEMORY)
-    {
-        SEC_SVR_ERR("%s", "Receiving request failed");
-        retval = send_generic_response(client_sockfd,
-            SECURITY_SERVER_MSG_TYPE_TOOL_RESPONSE,
-            SECURITY_SERVER_RETURN_CODE_BAD_REQUEST);
-        if (retval != SECURITY_SERVER_SUCCESS)
-        {
-            SEC_SVR_ERR("ERROR: Cannot send generic response: %d", retval);
-        }
-        goto error;
-    }
-    if (argcnum < 2)
-    {
-        SEC_SVR_ERR("Error: Too small number of argv [%d]", argcnum);
-        retval = send_generic_response(client_sockfd,
-            SECURITY_SERVER_MSG_TYPE_TOOL_RESPONSE,
-            SECURITY_SERVER_RETURN_CODE_BAD_REQUEST);
-        if (retval != SECURITY_SERVER_SUCCESS)
-        {
-            SEC_SVR_ERR("ERROR: Cannot send generic response: %d", retval);
-        }
-        goto error;
-    }
-    /* Execute the command */
-    retval = execute_debug_tool(argcnum, recved_argv, server_sockfd, client_sockfd);
-    if (retval != SECURITY_SERVER_SUCCESS)
-    {
-        SEC_SVR_ERR("Error: Cannot execute debug tool [%d]", retval);
-        retval = send_generic_response(client_sockfd,
-            SECURITY_SERVER_MSG_TYPE_TOOL_RESPONSE,
-            SECURITY_SERVER_RETURN_CODE_SERVER_ERROR);
-        if (retval != SECURITY_SERVER_SUCCESS)
-        {
-            SEC_SVR_ERR("ERROR: Cannot send generic response: %d", retval);
-        }
-    }
-    else
-    {
-        SEC_SVR_DBG("%s", "Tool has been executed");
-        retval = send_generic_response(client_sockfd,
-            SECURITY_SERVER_MSG_TYPE_TOOL_RESPONSE,
-            SECURITY_SERVER_RETURN_CODE_SUCCESS);
-        if (retval != SECURITY_SERVER_SUCCESS)
-        {
-            SEC_SVR_ERR("ERROR: Cannot send generic response: %d", retval);
-        }
-    }
-error:
-    free_argv(recved_argv, argcnum);
-    return retval;
-}
-
-
-/* Send exe path response to client
- *
- * Get exe path response packet format
- *  0                   1                   2                   3
- *  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
- * |---------------------------------------------------------------|
- * | version=0x01  |MessageID=0x24 |Message Length = 4+path length |
- * |---------------------------------------------------------------|
- * |  return code  |  Path length  |             Path              |
- * |---------------------------------------------------------------|
-
-*/
-int send_exe_path_response(int sockfd, const char *path)
-{
-    response_header hdr;
-    unsigned char *msg = NULL;
-    unsigned char *ptr = NULL;
-    int ret;
-    size_t path_len = 0;
-    unsigned short msg_len = 0;
-
-    if (!path) {
-        SEC_SVR_ERR("Path is NULL");
-        return SECURITY_SERVER_ERROR_INPUT_PARAM;
-    }
-
-    path_len = strlen(path);
-    msg_len = sizeof(hdr) + sizeof(size_t) + path_len;
-    msg = (unsigned char*)malloc(msg_len * sizeof(unsigned char));
-    if (!msg) {
-        SEC_SVR_ERR("malloc failed");
-        return SECURITY_SERVER_ERROR_OUT_OF_MEMORY;
-    }
-
-    /* Assemble header */
-    hdr.basic_hdr.version = SECURITY_SERVER_MSG_VERSION;
-    hdr.basic_hdr.msg_id = SECURITY_SERVER_MSG_TYPE_EXE_PATH_RESPONSE;
-    hdr.basic_hdr.msg_len = sizeof(size_t) + path_len;
-    hdr.return_code = SECURITY_SERVER_RETURN_CODE_SUCCESS;
-
-    /* Prepare packet */
-    ptr = msg;
-    memcpy(ptr, &hdr, sizeof(hdr));
-    ptr += sizeof(hdr);
-    memcpy(ptr, &path_len, sizeof(size_t));
-    ptr += sizeof(size_t);
-    memcpy(ptr, path, path_len);
-
-    /* Check poll */
-    ret = check_socket_poll(sockfd, POLLOUT, SECURITY_SERVER_SOCKET_TIMEOUT_MILISECOND);
-    if (ret == SECURITY_SERVER_ERROR_POLL)
-    {
-        SEC_SVR_ERR("%s", "poll() error");
-        ret = SECURITY_SERVER_ERROR_SEND_FAILED;
-        goto out;
-    }
-    if (ret == SECURITY_SERVER_ERROR_TIMEOUT)
-    {
-        SEC_SVR_ERR("%s", "poll() timeout");
-        ret = SECURITY_SERVER_ERROR_SEND_FAILED;
-        goto out;
-    }
-
-    /* Send it */
-    ret = TEMP_FAILURE_RETRY(write(sockfd, msg, msg_len));
-    if (ret < msg_len)
-    {
-        SEC_SVR_ERR("Error on write(): %d", ret);
-        ret = SECURITY_SERVER_ERROR_SEND_FAILED;
-        goto out;
-    }
-    ret = SECURITY_SERVER_SUCCESS;
-
-out:
-    free(msg);
-    return ret;
-}
-
-
-int process_exe_path_request(int sockfd)
-{
-    pid_t pid;
-    int retval;
-    char *exe = NULL;
-
-    // read pid
-    retval = TEMP_FAILURE_RETRY(read(sockfd, &pid, sizeof(pid_t)));
-    if (retval < (ssize_t) sizeof(pid_t))
-    {
-        SEC_SVR_ERR("Server Error: recieve failed: %d", retval);
-        retval = send_generic_response(
-            sockfd,
-            SECURITY_SERVER_MSG_TYPE_EXE_PATH_RESPONSE,
-            SECURITY_SERVER_RETURN_CODE_BAD_REQUEST);
-
-        if (retval != SECURITY_SERVER_SUCCESS)
-            SEC_SVR_ERR("Server ERROR: Cannot send generic response: %d", retval);
-        goto error;
-    }
-
-    SEC_SVR_DBG("Server: Get exe path request for pid %d", pid);
-
-    // get executable path
-    exe = read_exe_path_from_proc(pid);
-    if (!exe)
-    {
-        SEC_SVR_ERR("Server: Failed to read executable path for pid %d", pid);
-        retval = send_generic_response(
-            sockfd,
-            SECURITY_SERVER_MSG_TYPE_EXE_PATH_RESPONSE,
-            SECURITY_SERVER_RETURN_CODE_SERVER_ERROR);
-
-        if (retval != SECURITY_SERVER_SUCCESS)
-            SEC_SVR_ERR("Server ERROR: Cannot send generic response: %d", retval);
-        goto error;
-    }
-
-    // send response
-    retval = send_exe_path_response(sockfd, exe);
-    if (retval != SECURITY_SERVER_SUCCESS)
-        SEC_SVR_ERR("ERROR: Cannot send exe path response: %d", retval);
-
-error:
-    free(exe);
-    return retval;
-}
 
 int client_has_access(int sockfd, const char *object)
 {
@@ -1412,7 +994,7 @@ int client_has_access(int sockfd, const char *object)
     }
 
     if (SECURITY_SERVER_SUCCESS == authenticate_client_application(sockfd, &pid, &uid))
-        SECURE_LOGD("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=rw, result=%d",
+        SECURE_SLOGD("SS_SMACK: caller_pid=%d, subject=%s, object=%s, access=rw, result=%d",
             pid, label, object, ret);
 
     free(label);
@@ -1483,11 +1065,11 @@ void *security_server_thread(void *param)
             process_check_privilege_new_request(client_sockfd);
             break;
 
-        case SECURITY_SERVER_MSG_TYPE_OBJECT_NAME_REQUEST:
-            SEC_SVR_DBG("%s", "Get object name request received");
-            authorize_SS_API_caller_socket(client_sockfd, API_MIDDLEWARE, API_RULE_REQUIRED);
-            process_object_name_request(client_sockfd);
-            break;
+        // case SECURITY_SERVER_MSG_TYPE_OBJECT_NAME_REQUEST:
+        //     SECURE_SLOGD("%s", "Get object name request received");
+        //     authorize_SS_API_caller_socket(client_sockfd, API_MIDDLEWARE, API_RULE_REQUIRED);
+        //     process_object_name_request(client_sockfd);
+        //     break;
 
         case SECURITY_SERVER_MSG_TYPE_GID_REQUEST:
             SEC_SVR_DBG("%s", "Get GID received");
@@ -1507,64 +1089,55 @@ void *security_server_thread(void *param)
             process_smack_request(client_sockfd);
             break;
 
+#ifdef USE_SEC_SRV1_FOR_CHECK_PRIVILEGE_BY_PID
         case SECURITY_SERVER_MSG_TYPE_CHECK_PID_PRIVILEGE_REQUEST:
             SEC_SVR_DBG("%s", "PID privilege check request received");
             authorize_SS_API_caller_socket(client_sockfd, API_MIDDLEWARE, API_RULE_REQUIRED);
             //pass data size to function
             process_pid_privilege_check(client_sockfd, basic_hdr.msg_len);
             break;
-
-        case SECURITY_SERVER_MSG_TYPE_TOOL_REQUEST:
-            SEC_SVR_DBG("%s", "launch tool request received");
-            authorize_SS_API_caller_socket(client_sockfd, API_MIDDLEWARE, API_RULE_REQUIRED);
-            process_tool_request(client_sockfd, server_sockfd);
-            break;
+#endif
 
         case SECURITY_SERVER_MSG_TYPE_VALID_PWD_REQUEST:
-            SECURE_LOGD("%s", "Server: validate password request received");
+            SECURE_SLOGD("%s", "Server: validate password request received");
             authorize_SS_API_caller_socket(client_sockfd, API_PASSWD_CHECK, API_RULE_REQUIRED);
             process_valid_pwd_request(client_sockfd);
             break;
 
         case SECURITY_SERVER_MSG_TYPE_SET_PWD_REQUEST:
-            SECURE_LOGD("%s", "Server: set password request received");
+            SECURE_SLOGD("%s", "Server: set password request received");
             authorize_SS_API_caller_socket(client_sockfd, API_PASSWD_SET, API_RULE_REQUIRED);
             process_set_pwd_request(client_sockfd);
             break;
 
         case SECURITY_SERVER_MSG_TYPE_RESET_PWD_REQUEST:
-            SECURE_LOGD("%s", "Server: reset password request received");
+            SECURE_SLOGD("%s", "Server: reset password request received");
             authorize_SS_API_caller_socket(client_sockfd, API_PASSWD_SET, API_RULE_REQUIRED);
             process_reset_pwd_request(client_sockfd);
             break;
 
         case SECURITY_SERVER_MSG_TYPE_CHK_PWD_REQUEST:
-            SECURE_LOGD("%s", "Server: check password request received");
+            SECURE_SLOGD("%s", "Server: check password request received");
             authorize_SS_API_caller_socket(client_sockfd, API_PASSWD_CHECK, API_RULE_REQUIRED);
             process_chk_pwd_request(client_sockfd);
             break;
 
         case SECURITY_SERVER_MSG_TYPE_SET_PWD_HISTORY_REQUEST:
-            SECURE_LOGD("%s", "Server: set password histroy request received");
+            SECURE_SLOGD("%s", "Server: set password histroy request received");
             authorize_SS_API_caller_socket(client_sockfd, API_PASSWD_SET, API_RULE_REQUIRED);
             process_set_pwd_history_request(client_sockfd);
             break;
 
         case SECURITY_SERVER_MSG_TYPE_SET_PWD_MAX_CHALLENGE_REQUEST:
-            SECURE_LOGD("%s", "Server: set password max challenge request received");
+            SECURE_SLOGD("%s", "Server: set password max challenge request received");
             authorize_SS_API_caller_socket(client_sockfd, API_PASSWD_SET, API_RULE_REQUIRED);
             process_set_pwd_max_challenge_request(client_sockfd);
             break;
 
         case SECURITY_SERVER_MSG_TYPE_SET_PWD_VALIDITY_REQUEST:
-            SECURE_LOGD("%s", "Server: set password validity request received");
+            SECURE_SLOGD("%s", "Server: set password validity request received");
             authorize_SS_API_caller_socket(client_sockfd, API_PASSWD_SET, API_RULE_REQUIRED);
             process_set_pwd_validity_request(client_sockfd);
-            break;
-
-        case SECURITY_SERVER_MSG_TYPE_EXE_PATH_REQUEST:
-            SEC_SVR_DBG("Server: get executable path by pid request received");
-            process_exe_path_request(client_sockfd);
             break;
 
         /************************************************************************************************/
@@ -1663,7 +1236,7 @@ void *security_server_main_thread(void *data)
 
     (void)data;
 
-    SECURE_LOGD("%s", "Starting Security Server main thread");
+    SECURE_SLOGD("%s", "Starting Security Server main thread");
 
     /* security server must be executed by root */
     if (getuid() != 0)
@@ -1677,17 +1250,23 @@ void *security_server_main_thread(void *data)
     initiate_try();
 
     /* Create and bind a Unix domain socket */
-    retval = create_new_socket(&server_sockfd);
-    if (retval != SECURITY_SERVER_SUCCESS)
+    if(SECURITY_SERVER_SUCCESS != get_socket_from_systemd(&server_sockfd))
     {
-        SEC_SVR_ERR("%s", "cannot create socket. exiting...");
-        goto error;
-    }
+        SEC_SVR_ERR("%s", "Error in get_socket_from_systemd");
+        retval = create_new_socket(&server_sockfd);
+        if (retval != SECURITY_SERVER_SUCCESS)
+        {
+            SEC_SVR_ERR("%s", "cannot create socket. exiting...");
+            goto error;
+        }
 
-    if (listen(server_sockfd, 5) < 0)
-    {
-        SEC_SVR_ERR("%s", "listen() failed. exiting...");
-        goto error;
+        if (listen(server_sockfd, 5) < 0)
+        {
+            SEC_SVR_ERR("%s", "listen() failed. exiting...");
+            goto error;
+        }
+    } else {
+        SEC_SVR_ERR("%s", "Socket was passed by systemd");
     }
 
     /* Create a default cookie --> Cookie for root process */
@@ -1775,15 +1354,6 @@ ssize_t read_wrapper(int sockfd, void *buffer, size_t len)
     return done;
 }
 
-void *system_observer_main_thread(void *data)
-{
-    system_observer_main(data);
-    SEC_SVR_ERR("%s", "System observer: exit. No garbage collector support.");
-    netlink_enabled = 0;
-    pthread_detach(pthread_self());
-    pthread_exit(NULL);
-}
-
 int main(int argc, char *argv[])
 {
     int res;
@@ -1791,21 +1361,6 @@ int main(int argc, char *argv[])
 
     (void)argc;
     (void)argv;
-
-    // create observer thread only if smack is enabled
-    if (smack_check()) {
-        pthread_t system_observer;
-        system_observer_config so_config;
-        so_config.event_callback = rules_revoker_callback;
-
-        res = pthread_create(&system_observer, NULL, system_observer_main_thread, (void*)&so_config);
-
-        if (res != 0)
-            return -1;
-    }
-    else {
-        SEC_SVR_DBG("SMACK is not available. Observer thread disabled.");
-    }
 
     if (0 != (res = pthread_create(&main_thread, NULL, security_server_main_thread, NULL))) {
         SEC_SVR_ERR("Error: Server: Cannot create main security server thread: %s", strerror(res));

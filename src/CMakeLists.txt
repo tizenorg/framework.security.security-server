@@ -3,6 +3,7 @@ PKG_CHECK_MODULES(SECURITY_SERVER_DEP
     openssl
     libsmack
     libprivilege-control
+    libsystemd-daemon
     REQUIRED
     )
 
@@ -15,13 +16,16 @@ SET(SECURITY_SERVER_SOURCES
     ${SECURITY_SERVER_PATH}/server/security-server-main.c
     ${SECURITY_SERVER_PATH}/server/security-server-password.c
     ${SECURITY_SERVER_PATH}/util/security-server-util-common.c
-    ${SECURITY_SERVER_PATH}/server/security-server-system-observer.c
-    ${SECURITY_SERVER_PATH}/server/security-server-rules-revoker.c
     ${SECURITY_SERVER_PATH}/util/smack-check.c
     ${SERVER2_PATH}/main/socket-manager.cpp
     ${SERVER2_PATH}/main/server2-main.cpp
     ${SERVER2_PATH}/service/data-share.cpp
     ${SERVER2_PATH}/service/echo.cpp
+    ${SERVER2_PATH}/service/get-gid.cpp
+    ${SERVER2_PATH}/service/app-permissions.cpp
+    ${SERVER2_PATH}/service/privilege-by-pid.cpp
+    ${SERVER2_PATH}/service/exec-path.cpp
+    ${SERVER2_PATH}/service/get-object-name.cpp
     )
 
 SET_SOURCE_FILES_PROPERTIES(
@@ -62,6 +66,11 @@ INCLUDE_DIRECTORIES(
 SET(SECURITY_CLIENT_SOURCES
     ${SECURITY_SERVER_PATH}/server2/client/client-common.cpp
     ${SECURITY_SERVER_PATH}/server2/client/client-shared-memory.cpp
+    ${SECURITY_SERVER_PATH}/server2/client/client-get-gid.cpp
+    ${SECURITY_SERVER_PATH}/server2/client/client-app-permissions.cpp
+    ${SECURITY_SERVER_PATH}/server2/client/client-privilege-by-pid.cpp
+    ${SECURITY_SERVER_PATH}/server2/client/client-socket-privilege.cpp
+    ${SECURITY_SERVER_PATH}/server2/client/client-get-object-name.cpp
     ${SECURITY_SERVER_PATH}/client/security-server-client.c
     ${SECURITY_SERVER_PATH}/communication/security-server-comm.c
     ${SECURITY_SERVER_PATH}/util/smack-check.c
@@ -92,11 +101,6 @@ INSTALL(TARGETS ${TARGET_SECURITY_SERVER} DESTINATION bin)
 INSTALL(FILES
     ${SECURITY_SERVER_PATH}/include/security-server.h
     DESTINATION /usr/include/security-server
-    )
-
-INSTALL(FILES
-    ${SECURITY_SERVER_PATH}/security-serverd
-    DESTINATION /etc/rc.d/init.d
     )
 
 ################################################################################

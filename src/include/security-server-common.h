@@ -22,6 +22,10 @@
 #ifndef SECURITY_SERVER_COMMON_H
 #define SECURITY_SERVER_COMMON_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <sys/types.h>
 #include <dlog.h>
 
@@ -66,8 +70,6 @@
 #define SECURITY_SERVER_ACCEPT_TIMEOUT_MILISECOND          10000
 #define SECURITY_SERVER_SOCKET_TIMEOUT_MILISECOND          3000
 #define SECURITY_SERVER_DEVELOPER_UID                      5100
-#define SECURITY_SERVER_DEBUG_TOOL_PATH                    "/usr/bin/debug-util"
-#define SECURITY_SERVER_KILL_APP_PATH                      "/usr/bin/kill_app"
 #define SECURITY_SERVER_DATA_DIRECTORY_PATH                "/opt/data/security-server"
 #define SECURITY_SERVER_ATTEMPT_FILE_NAME                  "attempts"
 #define SECURITY_SERVER_HISTORY_FILE_NAME                  "history"
@@ -87,6 +89,8 @@
 
 
 /* Data types *****************************************************************/
+
+
 /* Cookie List data type */
 typedef struct _cookie_list
 {
@@ -130,6 +134,10 @@ void printhex(const unsigned char *data, int size);
 #define SECURE_LOGI(format, arg ...) SECURE_LOG_(LOG_ID_MAIN, DLOG_INFO, LOG_TAG, format, ##arg)
 #define SECURE_LOGW(format, arg ...) SECURE_LOG_(LOG_ID_MAIN, DLOG_WARN, LOG_TAG, format, ##arg)
 #define SECURE_LOGE(format, arg ...) SECURE_LOG_(LOG_ID_MAIN, DLOG_ERROR, LOG_TAG, format, ##arg)
+
+#ifndef SECURE_SLOGE
+    #define SECURE_SLOGE(format, arg ...) SECURE_LOG_(LOG_ID_MAIN, DLOG_ERROR, LOG_TAG, format, ##arg)
+#endif // SECURE_SLOGE
 /****************************/
 
 /* Debug */
@@ -142,20 +150,32 @@ void printhex(const unsigned char *data, int size);
                 __FILE__, __LINE__, ##ARG)
 
 #else
-#define SEC_SVR_ERR LOGE
+#ifdef LOG_TAG
+    #undef LOG_TAG
+#endif
+#define LOG_TAG "SECURITY_SERVER"
+#define SEC_SVR_ERR SLOGE
 #if SECURITY_SERVER_DEBUG_DLOG        /* debug msg will be printed by dlog daemon */
 #define SEC_SVR_DBG SLOGD
-#define SEC_SVR_WRN LOGW
+#define SEC_SVR_WRN SLOGW
 #else /* No debug output */
 
 #define SEC_SVR_DBG(FMT, ARG ...) do { } while(0)
 #define SEC_SVR_WRN(FMT, ARG ...) do { } while(0)
-#undef SECURE_LOGD
-#define SECURE_LOGD(FMT, ARG ...) do { } while(0)
-#undef SECURE_LOGW
-#define SECURE_LOGW(FMT, ARG ...) do { } while(0)
+#ifdef SECURE_SLOGD
+    #undef SECURE_SLOGD
+#endif
+#define SECURE_SLOGD(FMT, ARG ...) do { } while(0)
+#ifdef SECURE_SLOGW
+   #undef SECURE_SLOGW
+#endif
+#define SECURE_SLOGW(FMT, ARG ...) do { } while(0)
 
 #endif // SECURITY_SERVER_DEBUG_DLOG
 #endif // SECURITY_SERVER_DEBUG_TO_CONSOLE
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

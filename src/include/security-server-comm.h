@@ -43,14 +43,12 @@ typedef struct
 #define SECURITY_SERVER_MSG_TYPE_COOKIE_RESPONSE                0x02
 #define SECURITY_SERVER_MSG_TYPE_CHECK_PRIVILEGE_REQUEST        0x03
 #define SECURITY_SERVER_MSG_TYPE_CHECK_PRIVILEGE_RESPONSE       0x04
-#define SECURITY_SERVER_MSG_TYPE_OBJECT_NAME_REQUEST            0x05
-#define SECURITY_SERVER_MSG_TYPE_OBJECT_NAME_RESPONSE           0x06
+// #define SECURITY_SERVER_MSG_TYPE_OBJECT_NAME_REQUEST            0x05
+// #define SECURITY_SERVER_MSG_TYPE_OBJECT_NAME_RESPONSE           0x06
 #define SECURITY_SERVER_MSG_TYPE_GID_REQUEST                    0x07
 #define SECURITY_SERVER_MSG_TYPE_GID_RESPONSE                   0x08
 #define SECURITY_SERVER_MSG_TYPE_PID_REQUEST                    0x09
 #define SECURITY_SERVER_MSG_TYPE_PID_RESPONSE                   0x0a
-#define SECURITY_SERVER_MSG_TYPE_TOOL_REQUEST                   0x0b
-#define SECURITY_SERVER_MSG_TYPE_TOOL_RESPONSE                  0x0c
 #define SECURITY_SERVER_MSG_TYPE_VALID_PWD_REQUEST              0x0d
 #define SECURITY_SERVER_MSG_TYPE_VALID_PWD_RESPONSE             0x0e
 #define SECURITY_SERVER_MSG_TYPE_SET_PWD_REQUEST                0x0f
@@ -69,10 +67,10 @@ typedef struct
 #define SECURITY_SERVER_MSG_TYPE_SET_PWD_VALIDITY_RESPONSE      0x1c
 #define SECURITY_SERVER_MSG_TYPE_SMACK_REQUEST                  0x1d
 #define SECURITY_SERVER_MSG_TYPE_SMACK_RESPONSE                 0x1e
+#ifdef  USE_SEC_SRV1_FOR_CHECK_PRIVILEGE_BY_PID
 #define SECURITY_SERVER_MSG_TYPE_CHECK_PID_PRIVILEGE_REQUEST    0x21
 #define SECURITY_SERVER_MSG_TYPE_CHECK_PID_PRIVILEGE_RESPONSE   0x22
-#define SECURITY_SERVER_MSG_TYPE_EXE_PATH_REQUEST               0x23
-#define SECURITY_SERVER_MSG_TYPE_EXE_PATH_RESPONSE              0x24
+#endif
 #define SECURITY_SERVER_MSG_TYPE_GENERIC_RESPONSE               0xff
 
 /* Return code */
@@ -100,7 +98,6 @@ int accept_client(int server_sockfd);
 int authenticate_client_application(int sockfd, int *pid, int *uid);
 int authenticate_client_middleware(int sockfd, int *pid);
 int get_client_gid_list(int sockfd, int **privileges);
-int authenticate_developer_shell(int sockfd);
 int send_generic_response (int sockfd, unsigned char msgid, unsigned char return_code);
 int send_cookie(int sockfd, unsigned char *cookie);
 int send_object_name(int sockfd, char *obj);
@@ -134,13 +131,13 @@ int recv_smack_request(int sockfd, unsigned char *requested_cookie);
 int send_smack(int sockfd, char *label);
 int recv_smack_response(int sockfd, response_header *hdr, char *label);
 
+#ifdef USE_SEC_SRV1_FOR_CHECK_PRIVILEGE_BY_PID
 int send_pid_privilege_request(int sockfd, int pid, const char *object, const char *access_rights);
 int recv_pid_privilege_request(int sockfd, int datasize, int *pid, char **object, char **access_rights);
 int recv_pid_privilege_response(int sockfdi, response_header *hdr);
+#endif
 
-int send_launch_tool_request(int sock_fd, int argc, const char **argv);
 int recv_generic_response(int sockfd, response_header *hdr);
-int recv_launch_tool_request(int sockfd, int argc, char *argv[]);
 int recv_pwd_response(int sockfd, response_header *hdr, unsigned int *current_attempts,
                       unsigned int *max_attempts, unsigned int *valid_days);
 int send_set_pwd_request(int sock_fd, const char *cur_pwd, const char *new_pwd,
@@ -156,5 +153,6 @@ int send_reset_pwd_request(int sock_fd,
                            const unsigned int max_challenge,
                            const unsigned int valid_period_in_days);
 int send_set_pwd_history_request(int sock_fd, int num);
+int get_socket_from_systemd(int *sockfd);
 
 #endif
