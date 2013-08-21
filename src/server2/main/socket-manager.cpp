@@ -22,7 +22,11 @@
  * @brief       Implementation of SocketManager.
  */
 
+#include <set>
+
+#include <signal.h>
 #include <sys/select.h>
+#include <sys/signalfd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/smack.h>
@@ -59,6 +63,48 @@ struct DummyService : public GenericSocketService {
     void Event(const ReadEvent &event) { (void)event; }
     void Event(const CloseEvent &event) { (void)event; }
     void Event(const ErrorEvent &event) { (void)event; }
+};
+
+struct SignalService : public GenericSocketService {
+    int GetDescriptor() {
+        LogInfo("set up");
+        sigset_t mask;
+        sigemptyset(&mask);
+        sigaddset(&mask, SIGTERM);
+        if (-1 == pthread_sigmask(SIG_BLOCK, &mask, NULL))
+            return -1;
+        return signalfd(-1, &mask, 0);
+    }
+
+    ServiceDescriptionVector GetServiceDescription() {
+        return ServiceDescriptionVector();
+    }
+
+    void Event(const AcceptEvent &event) { (void)event; } // not supported
+    void Event(const WriteEvent &event) { (void)event; }  // not supported
+    void Event(const CloseEvent &event) { (void)event; }  // not supported
+    void Event(const ErrorEvent &event) { (void)event; }  // not supported
+
+    void Event(const ReadEvent &event) {
+        LogDebug("Get signal information");
+
+        if(sizeof(struct signalfd_siginfo) != event.rawBuffer.size()) {
+            LogError("Wrong size of signalfd_siginfo struct. Expected: "
+                << sizeof(signalfd_siginfo) << " Get: "
+                << event.rawBuffer.size());
+            return;
+        }
+
+        signalfd_siginfo *siginfo = (signalfd_siginfo*)(&(event.rawBuffer[0]));
+
+        if (siginfo->ssi_signo == SIGTERM) {
+            LogInfo("Got signal: SIGTERM");
+            static_cast<SocketManager*>(m_serviceManager)->MainLoopStop();
+            return;
+        }
+
+        LogInfo("This should not happend. Got signal: " << siginfo->ssi_signo);
+    }
 };
 
 SocketManager::SocketDescription&
@@ -110,18 +156,48 @@ SocketManager::SocketManager()
     sigemptyset(&set);
     sigaddset(&set, SIGPIPE);
     pthread_sigmask(SIG_BLOCK, &set, NULL);
+
+    // add support for TERM signal (passed from systemd)
+    auto *signalService = new SignalService;
+    int filefd = signalService->GetDescriptor();
+    if (-1 == filefd) {
+        LogError("Error in SignalService.GetDescriptor()");
+        delete signalService;
+    } else {
+        auto &desc2 = CreateDefaultReadSocketDescription(filefd, false);
+        desc2.service = signalService;
+        LogInfo("SignalService mounted on " << filefd << " descriptor");
+    }
 }
 
 SocketManager::~SocketManager() {
-    // TODO clean up all services!
+    std::set<GenericSocketService*> serviceMap;
+
+    // Find all services. Set is used to remove duplicates.
+    // In this implementation, services are not able to react in any way.
+    for (size_t i=0; i < m_socketDescriptionVector.size(); ++i)
+        if (m_socketDescriptionVector[i].isOpen)
+            serviceMap.insert(m_socketDescriptionVector[i].service);
+
+    // Time to destroy all services.
+    for(auto it = serviceMap.begin(); it != serviceMap.end(); ++it) {
+        LogDebug("delete " << (void*)(*it));
+        delete *it;
+    }
+
+    for (size_t i = 0; i < m_socketDescriptionVector.size(); ++i)
+        if (m_socketDescriptionVector[i].isOpen)
+            close(i);
+
+    // All socket except one were closed. Now pipe input must be closed.
+    close(m_notifyMe[1]);
 }
 
 void SocketManager::ReadyForAccept(int sock) {
     struct sockaddr_un clientAddr;
     unsigned int clientLen = sizeof(clientAddr);
-    LogInfo("Accept on sock: " << sock);
     int client = accept4(sock, (struct sockaddr*) &clientAddr, &clientLen, SOCK_NONBLOCK);
-    LogInfo("Socket opended: " << client);
+//    LogInfo("Accept on sock: " << sock << " Socket opended: " << client);
     if (-1 == client) {
         int err = errno;
         LogDebug("Error in accept: " << strerror(err));
@@ -257,8 +333,8 @@ void SocketManager::MainLoop() {
             ptrTimeout->tv_sec =
               currentTime < pqTimeout.time ? pqTimeout.time - currentTime : 0;
             ptrTimeout->tv_usec = 0;
-            LogDebug("Set up timeout: " << (int)ptrTimeout->tv_sec
-                << " seconds. Socket: " << pqTimeout.sock);
+//            LogDebug("Set up timeout: " << (int)ptrTimeout->tv_sec
+//                << " seconds. Socket: " << pqTimeout.sock);
         }
 
         int ret = select(m_maxDesc+1, &readSet, &writeSet, NULL, ptrTimeout);
@@ -321,6 +397,12 @@ void SocketManager::MainLoop() {
     }
 }
 
+void SocketManager::MainLoopStop()
+{
+    m_working = false;
+    NotifyMe();
+}
+
 int SocketManager::GetSocketFromSystemD(
     const GenericSocketService::ServiceDescription &desc)
 {
@@ -342,7 +424,7 @@ int SocketManager::GetSocketFromSystemD(
                                   desc.serviceHandlerPath.c_str(), 0))
         {
             LogInfo("Useable socket " << desc.serviceHandlerPath <<
-                " was passed by SystemD");
+                " was passed by SystemD under descriptor " << fd);
             return fd;
         }
     }
@@ -430,7 +512,6 @@ void SocketManager::CreateDomainSocket(
 }
 
 void SocketManager::RegisterSocketService(GenericSocketService *service) {
-    LogDebug("Pointer to service " << (void*) service);
     service->SetSocketManager(this);
     auto serviceVector = service->GetServiceDescription();
     Try {
@@ -520,7 +601,7 @@ void SocketManager::ProcessQueue() {
 }
 
 void SocketManager::CloseSocket(int sock) {
-    LogInfo("Closing socket: " << sock);
+//    LogInfo("Closing socket: " << sock);
     auto &desc = m_socketDescriptionVector[sock];
 
     if (!(desc.isOpen)) {
