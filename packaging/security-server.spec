@@ -1,24 +1,26 @@
-#sbs-git:slp/pkgs/s/security-server security-server 0.0.1 41964751bdbad7b215eea8f7ca955aa365348e4a
 Name:       security-server
-Summary:    Security server
-Version:    0.0.36
+Summary:    Security server and utilities
+Version:    0.0.132
 Release:    1
-Group:      TO_BE/FILLED_IN
-License:    Apache2.0
+Group:      System/Security
+License:    Apache-2.0
 Source0:    %{name}-%{version}.tar.gz
-BuildRequires:  cmake
-BuildRequires:  pkgconfig(dlog)
-BuildRequires:  pkgconfig(openssl)
-BuildRequires:  libattr-devel
-BuildRequires:  pkgconfig(libsmack)
+BuildRequires: cmake
+BuildRequires: pkgconfig(dlog)
+BuildRequires: pkgconfig(openssl)
+BuildRequires: libattr-devel
+BuildRequires: pkgconfig(libsmack)
+BuildRequires: pkgconfig(libprivilege-control)
+BuildRequires: pkgconfig(libsystemd-daemon)
+%{?systemd_requires}
 
 %description
-Security server package
+Security server and utilities
 
 %package -n libsecurity-server-client
 Summary:    Security server (client)
 Group:      Development/Libraries
-Requires:   %{name} = %{version}-%{release}
+Requires:   security-server = %{version}-%{release}
 Requires(post): /sbin/ldconfig
 Requires(postun): /sbin/ldconfig
 
@@ -29,55 +31,147 @@ Security server package (client)
 Summary:    Security server (client-devel)
 Group:      Development/Libraries
 Requires:   libsecurity-server-client = %{version}-%{release}
+Requires:   libprivilege-control-devel
 
 %description -n libsecurity-server-client-devel
 Security server package (client-devel)
 
+%package -n security-server-devel
+Summary:    for web applications (Development)
+Group:      Development/Libraries
+Requires:   security-server = %{version}-%{release}
+
+%description -n security-server-devel
+Security daemon for web applications (Development)
+
+%package -n security-server-certs
+Summary:    Certificates for web applications.
+Group:      Development/Libraries
+Requires:   security-server
+
+%description -n security-server-certs
+Certificates for wrt.
 
 %prep
 %setup -q
 
 %build
-cmake . -DCMAKE_INSTALL_PREFIX=%{_prefix}
+export CFLAGS="$CFLAGS -DTIZEN_DEBUG_ENABLE"
+export CXXFLAGS="$CXXFLAGS -DTIZEN_DEBUG_ENABLE"
+export FFLAGS="$FFLAGS -DTIZEN_DEBUG_ENABLE"
+export LDFLAGS+="-Wl,--rpath=%{_libdir}"
 
-
+%cmake . -DVERSION=%{version} \
+        -DCMAKE_BUILD_TYPE=DEBUG \
+        -DCMAKE_VERBOSE_MAKEFILE=ON
 make %{?jobs:-j%jobs}
 
 %install
 rm -rf %{buildroot}
+mkdir -p %{buildroot}/usr/share/license
+cp LICENSE %{buildroot}/usr/share/license/%{name}
+cp LICENSE %{buildroot}/usr/share/license/libsecurity-server-client
+mkdir -p %{buildroot}/etc/security/
+cp security-server-audit.conf %{buildroot}/etc/security/
 %make_install
 
+mkdir -p %{buildroot}/usr/lib/systemd/system/multi-user.target.wants
+mkdir -p %{buildroot}/usr/lib/systemd/system/sockets.target.wants
+ln -s ../security-server.service %{buildroot}/usr/lib/systemd/system/multi-user.target.wants/security-server.service
+ln -s ../security-server-data-share.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server-data-share.socket
+ln -s ../security-server-get-gid.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server-get-gid.socket
+ln -s ../security-server-privilege-by-pid.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server-privilege-by-pid.socket
+ln -s ../security-server-app-permissions.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server-app-permissions.socket
+ln -s ../security-server-cookie-get.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server-cookie-get.socket
+ln -s ../security-server-cookie-check.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server-cookie-check.socket
+ln -s ../security-server-app-privilege-by-name.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server-app-privilege-by-name.socket
+ln -s ../security-server-open-for-privileged.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server-open-for-privileged.socket
+ln -s ../security-server-open-for-unprivileged.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server-open-for-unprivileged.socket
+ln -s ../security-server-password-check.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server-password-check.socket
+ln -s ../security-server-password-set.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server-password-set.socket
+ln -s ../security-server-password-reset.socket %{buildroot}/usr/lib/systemd/system/sockets.target.wants/security-server-password-reset.socket
+
+%clean
+rm -rf %{buildroot}
 
 %post
-mkdir -p /etc/rc.d/rc3.d
-mkdir -p /etc/rc.d/rc5.d
-ln -s /etc/rc.d/init.d/security-serverd /etc/rc.d/rc3.d/S10security-server
-ln -s /etc/rc.d/init.d/security-serverd /etc/rc.d/rc5.d/S10security-server
+systemctl daemon-reload
+if [ $1 = 1 ]; then
+    # installation
+    systemctl start security-server.service
+fi
+
+if [ $1 = 2 ]; then
+    # update
+    systemctl restart security-server.service
+fi
+
+if [ ! -d "/var/log/audit" ]; then
+# Will enter here if audit directory doesn't exist
+mkdir -p /var/log/audit
+fi
+
+%preun
+if [ $1 = 0 ]; then
+    # unistall
+    systemctl stop security-server.service
+fi
 
 %postun
-rm -f /etc/rc.d/rc3.d/S10security-server
-rm -f /etc/rc.d/rc5.d/S10security-server
+if [ $1 = 0 ]; then
+    # unistall
+    systemctl daemon-reload
+fi
 
 %post -n libsecurity-server-client -p /sbin/ldconfig
 
 %postun -n libsecurity-server-client -p /sbin/ldconfig
 
+%files -n security-server
+%manifest %{_datadir}/security-server.manifest
+%attr(755,root,root) /usr/bin/security-server
+%{_libdir}/libsecurity-server-commons.so.*
+%attr(-,root,root) /usr/lib/systemd/system/multi-user.target.wants/security-server.service
+%attr(-,root,root) /usr/lib/systemd/system/security-server.service
+%attr(-,root,root) /usr/lib/systemd/system/security-server.target
+%attr(-,root,root) /usr/lib/systemd/system/sockets.target.wants/security-server-data-share.socket
+%attr(-,root,root) /usr/lib/systemd/system/security-server-data-share.socket
+%attr(-,root,root) /usr/lib/systemd/system/sockets.target.wants/security-server-get-gid.socket
+%attr(-,root,root) /usr/lib/systemd/system/security-server-get-gid.socket
+%attr(-,root,root) /usr/lib/systemd/system/sockets.target.wants/security-server-privilege-by-pid.socket
+%attr(-,root,root) /usr/lib/systemd/system/security-server-privilege-by-pid.socket
+%attr(-,root,root) /usr/lib/systemd/system/sockets.target.wants/security-server-app-permissions.socket
+%attr(-,root,root) /usr/lib/systemd/system/security-server-app-permissions.socket
+%attr(-,root,root) /usr/lib/systemd/system/sockets.target.wants/security-server-cookie-get.socket
+%attr(-,root,root) /usr/lib/systemd/system/security-server-cookie-get.socket
+%attr(-,root,root) /usr/lib/systemd/system/sockets.target.wants/security-server-cookie-check.socket
+%attr(-,root,root) /usr/lib/systemd/system/security-server-cookie-check.socket
+%attr(-,root,root) /usr/lib/systemd/system/sockets.target.wants/security-server-app-privilege-by-name.socket
+%attr(-,root,root) /usr/lib/systemd/system/security-server-app-privilege-by-name.socket
+%attr(-,root,root) /usr/lib/systemd/system/sockets.target.wants/security-server-open-for-privileged.socket
+%attr(-,root,root) /usr/lib/systemd/system/security-server-open-for-privileged.socket
+%attr(-,root,root) /usr/lib/systemd/system/sockets.target.wants/security-server-open-for-unprivileged.socket
+%attr(-,root,root) /usr/lib/systemd/system/security-server-open-for-unprivileged.socket
+%attr(-,root,root) /etc/security/security-server-audit.conf
+%attr(-,root,root) /usr/lib/systemd/system/sockets.target.wants/security-server-password-check.socket
+%attr(-,root,root) /usr/lib/systemd/system/security-server-password-check.socket
+%attr(-,root,root) /usr/lib/systemd/system/sockets.target.wants/security-server-password-set.socket
+%attr(-,root,root) /usr/lib/systemd/system/security-server-password-set.socket
+%attr(-,root,root) /usr/lib/systemd/system/sockets.target.wants/security-server-password-reset.socket
+%attr(-,root,root) /usr/lib/systemd/system/security-server-password-reset.socket
 
-%files
-%defattr(-,root,root,-)
-/etc/rc.d/init.d/security-serverd
-/usr/bin/security-server
-/usr/bin/sec-svr-util
-/usr/share/security-server/mw-list
-
+%{_datadir}/license/%{name}
 
 %files -n libsecurity-server-client
+%manifest %{_datadir}/libsecurity-server-client.manifest
 %defattr(-,root,root,-)
-/usr/lib/libsecurity-server-client.so.*
+%{_libdir}/libsecurity-server-client.so.*
+%{_datadir}/license/libsecurity-server-client
 
 %files -n libsecurity-server-client-devel
 %defattr(-,root,root,-)
-/usr/lib/libsecurity-server-client.so
+%{_libdir}/libsecurity-server-client.so
+%{_libdir}/libsecurity-server-commons.so
 /usr/include/security-server/security-server.h
-/usr/lib/pkgconfig/security-server.pc
-
+/usr/include/security-server/security-server-plugin-api.h
+%{_libdir}/pkgconfig/*.pc
