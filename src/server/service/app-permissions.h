@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2000 - 2013 Samsung Electronics Co., Ltd All Rights Reserved
+ *  Copyright (c) 2000 - 2015 Samsung Electronics Co., Ltd All Rights Reserved
  *
  *  Contact: Bumjin Im <bj.im@samsung.com>
  *
@@ -31,6 +31,11 @@
 #include <dpl/serialization.h>
 #include <message-buffer.h>
 #include <connection-info.h>
+#include <protocols.h>
+#include <transaction_manager.h>
+#include <security-server-error.h>
+
+#include <list>
 
 namespace SecurityServer {
 
@@ -40,6 +45,9 @@ class AppPermissionsService  :
 {
 public:
     ServiceDescriptionVector GetServiceDescription();
+
+    void Start();
+    void Stop();
 
     DECLARE_THREAD_EVENT(AcceptEvent, accept)
     DECLARE_THREAD_EVENT(WriteEvent, write)
@@ -52,12 +60,84 @@ public:
     void close(const CloseEvent &event);
 
 private:
+    struct Transaction {
+        enum Status {
+            UNSET,
+            BEGIN,
+            END
+        };
+
+        Transaction() : status(Status::UNSET) {}
+        operator bool() const {
+            return status != Status::UNSET;
+        }
+        bool operator==(const ConnectionID &_conn) const {
+            return status != Status::UNSET && _conn == conn;
+        }
+        bool operator!=(const ConnectionID &_conn) const {
+            return status != Status::UNSET && _conn != conn;
+        }
+        void begin(const ConnectionID &_conn) {
+            conn = _conn;
+            status = Status::BEGIN;
+        }
+        void finish() {
+            status = Status::END;
+        }
+        bool isEnded() const {
+            return status == Status::END;
+        }
+        void unset() {
+            status = Status::UNSET;
+        }
+
+        ConnectionID conn;
+        Status status;
+    };
     bool processOne(const ConnectionID &conn, MessageBuffer &buffer, InterfaceID interfaceID);
 
-    bool processPermissionsChange(const ConnectionID &conn, MessageBuffer &buffer);
-    bool processCheckAppPrivilege(const ConnectionID &conn, MessageBuffer &buffer);
+    static TransactionManager::Action toGenericAction(AppPermissionsAction action);
+    void confirmTransaction(const std::vector<ConnectionID> &clients, int result = SECURITY_SERVER_API_SUCCESS);
+    void confirmTransaction(const ConnectionID &client, int result = SECURITY_SERVER_API_SUCCESS);
+
+    int processBegin(void);
+    int processCommit(void);
+    int processRollback(void);
+
+    bool processPermissions(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processEnablePermission(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processDisablePermission(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processInstallApplication(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processUninstallApplication(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processRevokePermission(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processResetPermission(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processHasPermission(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processGetPermission(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processGetAppPermission(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processGetAppWithPermission(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processSetupPath(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processGetPath(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processRemovePath(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processAddFriend(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processDefinePermission(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processAdditionalRules(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processSetPrivilegeVersion(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processGetPrivilegeVersion(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processEnableBlacklist(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processDisableBlacklist(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processGetBlacklist(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processApplySharing(const ConnectionID &conn, MessageBuffer &buffer);
+    bool processDropSharing(const ConnectionID &conn, MessageBuffer &buffer);
+
+    bool processAppPermissionsChange(const ConnectionID &conn,
+                                     AppPermissionsAction &checkType,
+                                     MessageBuffer &buffer);
+    bool processAppCheckAppPrivilege(const ConnectionID &conn,
+                                     AppPermissionsAction &checkType,
+                                     MessageBuffer &buffer);
 
     ConnectionInfoMap m_connectionInfoMap;
+    TransactionManager m_transactionManager;
 };
 
 } // namespace SecurityServer

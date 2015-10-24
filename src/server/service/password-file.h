@@ -59,7 +59,7 @@ namespace SecurityServer
     class PasswordFile
     {
     public:
-        PasswordFile();
+        PasswordFile(const std::string &zone);
 
         void writeMemoryToFile() const;
         void writeAttemptToFile() const;
@@ -90,6 +90,8 @@ namespace SecurityServer
 
         bool isHistoryActive() const;
 
+        bool checkDataDir() const;
+
     private:
 #if (__GNUC__ > 4) || (__GNUC__ == 4 && (__GNUC_MINOR__ >= 7))
         typedef std::chrono::steady_clock ClockType;
@@ -110,6 +112,9 @@ namespace SecurityServer
         bool dirExists(const std::string &dirpath) const;
 
         mutable TimePoint m_retryTimerStart;
+
+        //zone name
+        std::string m_zone;
 
         //password file data
         IPasswordPtr m_passwordCurrent;

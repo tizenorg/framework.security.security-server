@@ -37,23 +37,30 @@ PluginHandler::PluginHandler()
   , m_plugin(NULL)
   , m_fail(true)
 {
+	char* dlErrStr;
     m_libHandler = dlopen(PLUGIN_PATH, RTLD_NOW);
     if (!m_libHandler) {
-        LogError("Plugin library has not been found/opened: " << dlerror());
+		dlErrStr = dlerror();
+		if (dlErrStr != NULL)
+			LogError("Plugin library has not been found/opened: " << dlErrStr);
         return;
     }
 
     CreatePasswordPlugin_t createFun =
             reinterpret_cast<CreatePasswordPlugin_t>(dlsym(m_libHandler, "create"));
     if (!createFun) {
-        LogError("Symbol create has not been found: " << dlerror());
+		dlErrStr = dlerror();
+		if (dlErrStr != NULL)
+			LogError("Symbol create has not been found: " << dlErrStr);
         return;
     }
 
     m_destroy = reinterpret_cast<DestroyPasswordPlugin_t>(dlsym(m_libHandler, "destroy"));
 
     if (!m_destroy) {
-        LogError("Symbol destroy has not been found: " << dlerror());
+		dlErrStr = dlerror();
+		if (dlErrStr != NULL)
+			LogError("Symbol destroy has not been found: " << dlErrStr);
         return;
     }
 
@@ -72,36 +79,37 @@ bool PluginHandler::fail() const {
 }
 
 int PluginHandler::changeUserPassword(
+    const std::string &zone,
     uid_t user,
     const std::string &oldPass,
     const std::string &newPass)
 {
     if (m_plugin)
-        return m_plugin->changeUserPassword(user, oldPass, newPass);
+        return m_plugin->changeUserPassword(zone, user, oldPass, newPass);
     return SECURITY_SERVER_PLUGIN_SUCCESS;
 }
 
-int PluginHandler::login(uid_t user, const std::string &password) {
+int PluginHandler::login(const std::string &zone, uid_t user, const std::string &password) {
     if (m_plugin)
-        return m_plugin->login(user, password);
+        return m_plugin->login(zone, user, password);
     return SECURITY_SERVER_PLUGIN_SUCCESS;
 }
 
-int PluginHandler::logout(uid_t user) {
+int PluginHandler::logout(const std::string &zone, uid_t user) {
     if (m_plugin)
-        return m_plugin->logout(user);
+        return m_plugin->logout(zone, user);
     return SECURITY_SERVER_PLUGIN_SUCCESS;
 }
 
-int PluginHandler::resetUserPassword(uid_t user, const std::string &newPass) {
+int PluginHandler::resetUserPassword(const std::string &zone, uid_t user, const std::string &newPass) {
     if (m_plugin)
-        return m_plugin->resetUserPassword(user, newPass);
+        return m_plugin->resetUserPassword(zone, user, newPass);
     return SECURITY_SERVER_PLUGIN_SUCCESS;
 }
 
-int PluginHandler::removeUserData(uid_t user) {
+int PluginHandler::removeUserData(const std::string &zone, uid_t user) {
     if (m_plugin)
-        return m_plugin->removeUserData(user);
+        return m_plugin->removeUserData(zone, user);
     return SECURITY_SERVER_PLUGIN_SUCCESS;
 }
 

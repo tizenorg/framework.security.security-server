@@ -1,0 +1,5 @@
+# labels not-allowed to be set as smack ACCESS label using security_server_label_access()
+# put each allowed label in new line
+# i.e.
+# my-app-1
+# system-service-something

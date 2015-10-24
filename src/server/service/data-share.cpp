@@ -29,7 +29,7 @@
 
 #include <protocols.h>
 #include <data-share.h>
-#include <security-server.h>
+#include <security-server-error.h>
 #include <security-server-util.h>
 #include <smack-check.h>
 
@@ -38,6 +38,14 @@ namespace SecurityServer {
 GenericSocketService::ServiceDescriptionVector SharedMemoryService::GetServiceDescription() {
     return ServiceDescriptionVector
         {{SERVICE_SOCKET_SHARED_MEMORY, "security-server::api-data-share"}};
+}
+
+void SharedMemoryService::Start() {
+    Create();
+}
+
+void SharedMemoryService::Stop() {
+    Join();
 }
 
 void SharedMemoryService::accept(const AcceptEvent &event) {

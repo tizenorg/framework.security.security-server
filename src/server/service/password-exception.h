@@ -42,6 +42,8 @@ namespace SecurityServer
         DECLARE_EXCEPTION_TYPE(Base, NoPasswords)
         DECLARE_EXCEPTION_TYPE(Base, PasswordNotActive)
         DECLARE_EXCEPTION_TYPE(Base, MakeDirError)
+		DECLARE_EXCEPTION_TYPE(Base, ChmodError)
+		DECLARE_EXCEPTION_TYPE(Base, RemoveError)
         DECLARE_EXCEPTION_TYPE(Base, TimerError)
     };
 } //namespace SecurityServer

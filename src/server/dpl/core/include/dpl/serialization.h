@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011 Samsung Electronics Co., Ltd All Rights Reserved
+ * Copyright (c) 2011-2015 Samsung Electronics Co., Ltd All Rights Reserved
  *
  *    Licensed under the Apache License, Version 2.0 (the "License");
  *    you may not use this file except in compliance with the License.
@@ -22,11 +22,14 @@
 #ifndef SERIALIZATION_H
 #define SERIALIZATION_H
 
+#include <cstring>
 #include <string>
 #include <vector>
 #include <list>
 #include <map>
 #include <memory>
+
+#include <permission-types.h>
 
 namespace SecurityServer {
 // Abstract data stream buffer
@@ -218,6 +221,18 @@ struct Serialization {
     {
         Serialize(stream, *p);
     }
+    // Custom structures
+    static void Serialize(IStream& stream, const perm_app_status_t &status) {
+        Serialize(stream, std::string(status.app_id));
+        Serialize(stream, status.is_enabled);
+        Serialize(stream, status.is_permanent);
+    }
+
+    static void Serialize(IStream& stream, const perm_blacklist_status_t &status) {
+        Serialize(stream, std::string(status.permission_name));
+        Serialize(stream, static_cast<int>(status.type));
+        Serialize(stream, status.is_enabled);
+    }
 }; // struct Serialization
 
 struct Deserialization {
@@ -398,6 +413,37 @@ struct Deserialization {
     {
         map = new std::map<K, T>;
         Deserialize(stream, *map);
+    }
+
+    // Custom structures
+    static void Deserialize(IStream& stream, perm_app_status_t &status) {
+        std::string appIdString;
+        bool is_enabled, is_permanent;
+        Deserialize(stream, appIdString);
+        Deserialize(stream, is_enabled);
+        Deserialize(stream, is_permanent);
+
+        status.app_id = strdup(appIdString.c_str());
+        if (status.app_id == nullptr)
+            throw std::bad_alloc();
+        status.is_permanent = is_permanent;
+        status.is_enabled = is_enabled;
+    }
+    // Custom structures
+    static void Deserialize(IStream& stream, perm_blacklist_status_t &status) {
+        std::string permString;
+        int appType;
+        bool is_enabled;
+        Deserialize(stream, permString);
+        Deserialize(stream, appType);
+        Deserialize(stream, is_enabled);
+
+        status.permission_name = strdup(permString.c_str());
+        if (status.permission_name == nullptr)
+            throw std::bad_alloc();
+        status.type = static_cast<app_type_t>(appType);
+        status.is_enabled = is_enabled;
+
     }
 }; // struct Deserialization
 } // namespace SecurityServer

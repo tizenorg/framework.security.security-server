@@ -39,8 +39,9 @@
 #include <dpl/log/log.h>
 #include <dpl/serialization.h>
 
-#include <security-server.h>
+#include <security-server-error.h>
 #include <security-server-util.h>
+#include <privilege-control.h>
 #include <error-description.h>
 
 const std::string XATTR_NAME = "security.openfor.provider";
@@ -48,18 +49,37 @@ const std::string DATA_DIR = "/var/run/security-server";
 const std::string ALLOWED_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ \
                                    abcdefghijklmnopqrstuvwxyz \
                                    0123456789._-";
+const std::string LINK_DIR_SUFFIX = "_links";
+const size_t LINK_SIZE_MAX = 256;
 
 namespace
 {
+
 std::string dirFilename(const std::string &dir,
                         const std::string &filename)
 {
     return dir + "/" + filename;
 }
+
+bool getPathFromLink(const std::string &linkname, std::string& path)
+{
+    path.resize(LINK_SIZE_MAX);
+    const std::string linkLocation = dirFilename(DATA_DIR, linkname);
+    int readBytes = readlink(linkLocation.c_str(), &path.front(), LINK_SIZE_MAX);
+    int err = errno;
+    if (readBytes < 0) {
+        LogError("readlink failed: " << SecurityServer::errnoToString(err));
+        return true;
+    }
+
+    return false;
+}
+
 bool fileExist(const std::string &filename)
 {
     std::string filepath = dirFilename(DATA_DIR, filename);
     struct stat buf;
+    LogDebug("Checking if file " << filepath << " exists");
 
     return ((lstat(filepath.c_str(), &buf) == 0) &&
             (((buf.st_mode) & S_IFMT) != S_IFLNK));
@@ -71,6 +91,15 @@ bool dirExist(const std::string &dirpath)
 
     return ((lstat(dirpath.c_str(), &buf) == 0) &&
             (((buf.st_mode) & S_IFMT) == S_IFDIR));
+}
+
+bool linkExist(const std::string &linkname)
+{
+    std::string linkpath = dirFilename(DATA_DIR, linkname);
+    struct stat buf;
+
+    return ((lstat(linkpath.c_str(), &buf) == 0) &&
+            (((buf.st_mode) & S_IFMT) == S_IFLNK));
 }
 
 bool deleteDir(const std::string &dirpath)
@@ -152,8 +181,31 @@ bool deleteFile(const std::string &filename)
     std::string filepath = dirFilename(DATA_DIR, filename);
 
     if (remove(filepath.c_str())) {
-        LogError("Unable to delete file: " << filename.c_str() << " "
+        LogError("Unable to delete file: " << filepath.c_str() << " "
                  << SecurityServer::errnoToString(errno));
+        return true;
+    }
+
+    return false;
+}
+
+bool createProviderLink(const std::string &filename, const std::string &contents)
+{
+    std::string filepath = dirFilename(DATA_DIR, filename);
+    std::string contentspath = dirFilename(DATA_DIR, contents);
+
+    if(linkExist(filename)) {
+        LogDebug("Deleting link " << filename);
+        if(::deleteFile(filename))
+            return false;
+    }
+
+    // using the fact that symlink contents are not checked, input there
+    // whatever comes after DATA_DIR. We will add DATA_DIR later on during delete.
+    int ret = symlink(contents.c_str(), filepath.c_str());
+    int err = errno;
+    if (ret < 0) {
+        LogError("Cannot create symlink. Error: " << SecurityServer::errnoToString(err));
         return true;
     }
 
@@ -221,7 +273,7 @@ namespace SecurityServer
 
         if (smack_check()) {
             char label[SMACK_LABEL_LEN + 1];
-            if (PC_OPERATION_SUCCESS != get_smack_label_from_process(m_cr.pid, label)) {
+            if (PC_OPERATION_SUCCESS != ss_get_smack_label_from_process(m_cr.pid, label)) {
                 LogError("Unable to get smack label of process.");
                 return true;
             }
@@ -240,11 +292,16 @@ namespace SecurityServer
     // SharedFile implementations
     SharedFile::SharedFile()
     {
-        if (!dirExist(DATA_DIR.c_str()))
-            mkdir(DATA_DIR.c_str(), 0700);
+        if (!dirExist(DATA_DIR.c_str())) {
+            if (mkdir(DATA_DIR.c_str(), 0700)) {
+				LogError("Unable to create " << DATA_DIR);
+			}
+		}
         else {
             deleteDir(DATA_DIR.c_str());
-            mkdir(DATA_DIR.c_str(), 0700);
+            if (mkdir(DATA_DIR.c_str(), 0700)) {
+				LogError("Unable to create " << DATA_DIR);
+			}
         }
     }
 
@@ -348,6 +405,22 @@ namespace SecurityServer
         if (setFileLabel(dir_and_filename, client_label.c_str()))
             return SECURITY_SERVER_API_ERROR_SETTING_FILE_LABEL_FAILED;
 
+        // TODO Proper implementation of "provider removes client's file" scenario
+        //      would require a database with "which provider created which file" mapping.
+        //      Since this is a quick workaround, it could be possible that it contains some
+        //      security flaws (the links which bind provider with created file are kept on
+        //      the filesystem, so someone with appropriate capabilities could cause some
+        //      damage). Consider changing to aforementioned database.
+
+        // reuse createClientDirectory to create a directory for provider's links
+        const std::string links_dir = m_sockCred.getLabel() + LINK_DIR_SUFFIX;
+        if (createClientDirectory(links_dir))
+            return SECURITY_SERVER_API_ERROR_DIRECTORY_CREATION_FAILED;
+
+        const std::string links_dir_and_filename = dirFilename(links_dir, filename);
+        if (createProviderLink(links_dir_and_filename, dir_and_filename))
+            return SECURITY_SERVER_API_ERROR_LINK_CREATION_FAILED;
+
         return SECURITY_SERVER_API_SUCCESS;
     }
 
@@ -424,8 +497,31 @@ namespace SecurityServer
             return SECURITY_SERVER_API_ERROR_GETTING_SOCKET_LABEL_FAILED;
 
         std::string dir_and_filename = dirFilename(m_sockCred.getLabel(), filename);
-        if (!fileExist(dir_and_filename))
-            return SECURITY_SERVER_API_ERROR_FILE_NOT_EXIST;
+        std::string links_dir_and_filename;
+        if (!fileExist(dir_and_filename)) {
+            LogDebug("File not found, checking if something can be found in provider's dir...");
+            // we might be a provider, check if there is a link waiting for us
+            links_dir_and_filename = dirFilename(m_sockCred.getLabel() + LINK_DIR_SUFFIX,
+                                                 filename);
+            if (!linkExist(links_dir_and_filename))
+                return SECURITY_SERVER_API_ERROR_FILE_NOT_EXIST;
+
+            // link exists, extract its contents and construct correct dir_and_filename,
+            // whlist original contents of dir_and_filename are transferred for naming sake
+            // to links_dir_and_filename
+            LogDebug("There is a link " << links_dir_and_filename);
+            dir_and_filename="";
+            if (getPathFromLink(links_dir_and_filename, dir_and_filename))
+                return SECURITY_SERVER_API_ERROR_FILE_NOT_EXIST;
+
+            LogDebug("Checking for file under " << dir_and_filename);
+
+            // check once again if whatever link gave us is correct
+            if (!fileExist(dir_and_filename))
+                return SECURITY_SERVER_API_ERROR_FILE_NOT_EXIST;
+        }
+
+        LogDebug("Found file " << dir_and_filename << ", deleting.");
 
         if (getFileLabel(dir_and_filename))
             return SECURITY_SERVER_API_ERROR_GETTING_FILE_LABEL_FAILED;
@@ -437,6 +533,10 @@ namespace SecurityServer
             (m_fileXattr == m_sockCred.getLabel())) {
             if (::deleteFile(dir_and_filename))
                 return SECURITY_SERVER_API_ERROR_FILE_DELETION_FAILED;
+
+            LogDebug("Deleting link " << links_dir_and_filename);
+            if (!links_dir_and_filename.empty() && ::deleteFile(links_dir_and_filename))
+                return SECURITY_SERVER_API_ERROR_LINK_DELETION_FAILED;
         } else
             return SECURITY_SERVER_API_ERROR_AUTHENTICATION_FAILED;
 

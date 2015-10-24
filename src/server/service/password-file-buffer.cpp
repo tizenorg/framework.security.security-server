@@ -30,7 +30,7 @@
 #include <dpl/log/log.h>
 #include <dpl/fstream_accessors.h>
 
-#include <security-server.h>
+#include <security-server-error.h>
 #include <password-exception.h>
 
 #include <fcntl.h>

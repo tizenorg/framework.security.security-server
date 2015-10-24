@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2000 - 2013 Samsung Electronics Co., Ltd All Rights Reserved
+ *  Copyright (c) 2000 - 2015 Samsung Electronics Co., Ltd All Rights Reserved
  *
  *  Contact: Bumjin Im <bj.im@samsung.com>
  *
@@ -36,6 +36,8 @@ char const * const SERVICE_SOCKET_GET_GID =
     "/tmp/.security-server-api-get-gid.sock";
 char const * const SERVICE_SOCKET_PRIVILEGE_BY_PID =
     "/tmp/.security-server-api-privilege-by-pid.sock";
+char const * const SERVICE_SOCKET_PERMISSIONS =
+    "/tmp/.security-server-api-permissions.sock";
 char const * const SERVICE_SOCKET_APP_PERMISSIONS =
     "/tmp/.security-server-api-app-permissions.sock";
 char const * const SERVICE_SOCKET_APP_PRIVILEGE_BY_NAME =
@@ -54,6 +56,8 @@ char const * const SERVICE_SOCKET_PASSWD_SET =
     "/tmp/.security-server-api-password-set.sock";
 char const * const SERVICE_SOCKET_PASSWD_RESET =
     "/tmp/.security-server-api-password-reset.sock";
+char const * const SERVICE_SOCKET_LABEL =
+    "/tmp/.security-server-api-label.sock";
 
 const size_t COOKIE_SIZE = 20;
 

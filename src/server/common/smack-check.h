@@ -17,6 +17,7 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License
  */
+#include <sys/types.h>
 
 #ifndef _SMACK_CHECK_H_
 #define _SMACK_CHECK_H_
@@ -27,7 +28,6 @@ namespace SecurityServer {
  * A very simple runtime check for SMACK on the platform
  * Returns 1 if SMACK is present, 0 otherwise
  */
-
 int smack_runtime_check(void);
 
 /*
@@ -36,6 +36,32 @@ int smack_runtime_check(void);
  * It returns 0.
  */
 int smack_check(void);
+
+/*
+ * Gets smack label of a process in zone, based on its pid.
+ *
+ * @param  zone         zone name
+ * @param  pid          pid of process
+ * @param  smack_label  label of process
+ * Returns 0 on success, -1 otherwise.
+ */
+int get_smack_label_from_zone_process(const char *zone, const pid_t pid, char *smack_label);
+
+/*
+ * Checks if process with pid in Zone has access to object.
+ * This function checks if subject has access to object via smack_have_access() function.
+ * If YES then returns access granted. In NO then function checks if process with pid has
+ * CAP_MAC_OVERRIDE capability. If YES then returns access granted.
+ * If NO then returns access denied.
+ *
+ * @param  zone         zone name
+ * @param  pid          pid of process in zone
+ * @param  object       label of object to access
+ * @param  access_type  smack access type.
+ * @return              0 (no access) or 1 (access) or -1 (error)
+ */
+int smack_pid_have_access_from_zone(const char *zone, pid_t pid, const char *object,
+                                    const char *access_type);
 
 } // namespace SecurityServer
 

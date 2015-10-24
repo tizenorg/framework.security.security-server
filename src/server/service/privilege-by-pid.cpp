@@ -30,17 +30,24 @@
 #include <protocols.h>
 #include <privilege-by-pid.h>
 
-#include <security-server.h>
+#include <security-server-error.h>
 #include <security-server-util.h>
 #include <smack-check.h>
-
-#include <privilege-control.h>
+#include <zone-check.h>
 
 namespace SecurityServer {
 
 GenericSocketService::ServiceDescriptionVector PrivilegeByPidService::GetServiceDescription() {
     return ServiceDescriptionVector
         {{SERVICE_SOCKET_PRIVILEGE_BY_PID, "security-server::api-privilege-by-pid" }};
+}
+
+void PrivilegeByPidService::Start() {
+    Create();
+}
+
+void PrivilegeByPidService::Stop() {
+    Join();
 }
 
 void PrivilegeByPidService::accept(const AcceptEvent &event) {
@@ -61,6 +68,7 @@ bool PrivilegeByPidService::processOne(const ConnectionID &conn, MessageBuffer &
 
     int retval;
     int pid;
+    std::string zone;
     std::string object;
     std::string access_rights;
     char subject[SMACK_LABEL_LEN + 1] = {0};
@@ -83,14 +91,22 @@ bool PrivilegeByPidService::processOne(const ConnectionID &conn, MessageBuffer &
     }
 
     if (smack_check()) {
-        retval = smack_pid_have_access(pid, object.c_str(), access_rights.c_str());
+
+        if(lookup_zone_by_sockfd(conn.sock, zone)) {
+            retCode = SECURITY_SERVER_API_ERROR_GETTING_ZONE_INFO_FAILED;
+            goto send;
+        }
+        LogInfo("Zone(" << zone << ") is found");
+
+        retval = smack_pid_have_access_from_zone(zone.c_str(), pid, object.c_str(), access_rights.c_str());
         LogDebug("smack_pid_have_access returned " << retval);
 
-        if (get_smack_label_from_process(pid, subject) != PC_OPERATION_SUCCESS) {
+        if (get_smack_label_from_zone_process(zone.c_str(), pid, subject) != 0) {
             // subject label is set to empty string
-            LogError("get_smack_label_from_process failed. Subject label has not been read.");
+            LogError("ss_get_smack_label_from_process failed. Subject label has not been read.");
         } else {
-            LogSecureDebug("Subject label of client PID " << pid << " is: " << subject);
+            LogSecureDebug("Subject label of client zone(PID) " << zone << "(" << pid << ")" <<
+                           " is: " << subject);
         }
     } else {
         LogDebug("SMACK is not available. Subject label has not been read.");
@@ -102,23 +118,24 @@ bool PrivilegeByPidService::processOne(const ConnectionID &conn, MessageBuffer &
     else                //there is no permission
         retCode = SECURITY_SERVER_API_ERROR_ACCESS_DENIED;
 
-    MessageBuffer sendBuffer;
-    Serialization::Serialize(sendBuffer, retCode);
-    m_serviceManager->Write(conn, sendBuffer.Pop());
-
     if (retval != 1 && subject[0] != '\0') {
         char *path = read_exe_path_from_proc(pid);
 
         LogSmackAudit("SS_SMACK: "
-            << "caller_pid=" << pid
-            << ", subject="  << subject
-            << ", object="   << object
-            << ", access="   << access_rights
-            << ", result="   << retval
+            << "zone="         << zone
+            << ", caller_pid=" << pid
+            << ", subject="    << subject
+            << ", object="     << object
+            << ", access="     << access_rights
+            << ", result="     << retval
             << ", caller_path=" << (path ? path : "" ));
 
         free(path);
     }
+send:
+    MessageBuffer sendBuffer;
+    Serialization::Serialize(sendBuffer, retCode);
+    m_serviceManager->Write(conn, sendBuffer.Pop());
 
     return true;
 }

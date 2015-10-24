@@ -1,0 +1,11 @@
+# subject labels allowed to use security_server_label_access() and security_server_label_transmute()
+# put each allowed label in new line
+# i.e.
+# my-app-1
+# system-service-something
+sdbd
+pkgmgr
+pkgmgr-server
+rpm-backend
+backup-manager
+wrt-installer

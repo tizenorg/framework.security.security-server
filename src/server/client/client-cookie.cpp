@@ -322,3 +322,42 @@ int security_server_get_gid_by_cookie(const char *cookie, gid_t *gid)
     });
 }
 
+SECURITY_SERVER_API
+int security_server_get_zone_by_cookie(const char *cookie, char **zone)
+{
+    using namespace SecurityServer;
+    MessageBuffer send, recv;
+    int retval = SECURITY_SERVER_API_ERROR_UNKNOWN;
+    std::string name;
+
+    LogDebug("security_server_get_zone_by_cookie() called");
+
+    if ((cookie == NULL) || (zone == NULL))
+        return SECURITY_SERVER_API_ERROR_INPUT_PARAM;
+
+    //preprae cookie to send
+    std::vector<char> key(cookie, cookie + COOKIE_SIZE);
+
+    return try_catch([&] {
+        //put data into buffer
+        Serialization::Serialize(send, (int)CookieCall::CHECK_ZONE);
+        Serialization::Serialize(send, key);
+
+        //send buffer to server
+        retval = sendToServer(SERVICE_SOCKET_COOKIE_CHECK, send.Pop(), recv);
+        if (retval != SECURITY_SERVER_API_SUCCESS) {
+            LogDebug("Error in sendToServer. Error code: " << retval);
+            return retval;
+        }
+
+        //receive response from server
+        Deserialization::Deserialize(recv, retval);
+        if (retval == SECURITY_SERVER_API_SUCCESS) {
+            Deserialization::Deserialize(recv, name);
+        }
+
+        *zone = strdup(name.c_str());
+
+        return retval;
+    });
+}

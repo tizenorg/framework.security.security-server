@@ -1,0 +1,14 @@
+[Socket]
+ListenStream=/tmp/.security-server-label.sock
+SocketMode=0777
+SmackLabelIPIn=security-server::label
+SmackLabelIPOut=@
+
+Service=security-server.service
+
+[Unit]
+Wants=security-server.target
+Before=security-server.target
+
+[Install]
+WantedBy=sockets.target

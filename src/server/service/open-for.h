@@ -51,6 +51,9 @@ namespace SecurityServer
         //service functions
         ServiceDescriptionVector GetServiceDescription();
 
+        void Start();
+        void Stop();
+
         DECLARE_THREAD_EVENT(AcceptEvent, accept)
         DECLARE_THREAD_EVENT(WriteEvent, write)
         DECLARE_THREAD_EVENT(ReadEvent, process)
@@ -86,8 +89,7 @@ namespace SecurityServer
 
         //internal service functions
         int addWatchToDirectory(const std::string &filename,
-                                const std::string &client_label,
-                                int & fd);
+                                const std::string &client_label);
         bool processOne(const ConnectionID &conn,
                         MessageBuffer &buffer,
                         InterfaceID interfaceID,

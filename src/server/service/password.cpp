@@ -31,8 +31,9 @@
 
 #include <password.h>
 
-#include <security-server.h>
+#include <security-server-error.h>
 #include <password-exception.h>
+#include <zone-check.h>
 
 namespace SecurityServer {
 
@@ -73,6 +74,14 @@ GenericSocketService::ServiceDescriptionVector PasswordService::GetServiceDescri
     };
 }
 
+void PasswordService::Start() {
+    Create();
+}
+
+void PasswordService::Stop() {
+    Join();
+}
+
 void PasswordService::accept(const AcceptEvent &event)
 {
     LogSecureDebug("Accept event. ConnectionID.sock: " << event.connectionID.sock
@@ -109,36 +118,36 @@ void PasswordService::close(const CloseEvent &event)
 }
 
 int PasswordService::processCheckFunctions(PasswordHdrs hdr, MessageBuffer& buffer,
-                                            unsigned int &cur_att, unsigned int &max_att,
-                                            unsigned int &exp_time)
+                                           const std::string &zone, unsigned int &cur_att,
+                                           unsigned int &max_att, unsigned int &exp_time)
 {
     int result = SECURITY_SERVER_API_ERROR_SERVER_ERROR;
 
     switch (hdr) {
         case PasswordHdrs::HDR_IS_PWD_VALID:
-            result = m_pwdManager.isPwdValid(cur_att, max_att, exp_time);
+            result = m_pwdManager.isPwdValid(zone, cur_att, max_att, exp_time);
             break;
 
         case PasswordHdrs::HDR_CHK_PWD: {
             std::string challenge;
             Deserialization::Deserialize(buffer, challenge);
-            result = m_pwdManager.checkPassword(challenge, cur_att, max_att, exp_time);
+            result = m_pwdManager.checkPassword(zone, challenge, cur_att, max_att, exp_time);
 
             // Plugin Password API
             if ((result == SECURITY_SERVER_API_SUCCESS)
-                && (SECURITY_SERVER_PLUGIN_SUCCESS != m_pluginHandler.login(APP_USER, challenge)))
+                && (SECURITY_SERVER_PLUGIN_SUCCESS != m_pluginHandler.login(zone, APP_USER, challenge)))
             {
                 // Ok we have a special case like: broken memory or user removed
                 // memory during password change.
                 LogError("The password was rejected by plugin. We have desynchronization problem with CKM!"
                     " Security-server will try to reset all user data stored in ckm. ");
 
-                if (SECURITY_SERVER_PLUGIN_SUCCESS != m_pluginHandler.removeUserData(APP_USER)) {
+                if (SECURITY_SERVER_PLUGIN_SUCCESS != m_pluginHandler.removeUserData(zone, APP_USER)) {
                     LogError("Security server could not remove user data.");
                     break;
                 }
 
-                if (SECURITY_SERVER_PLUGIN_SUCCESS != m_pluginHandler.login(APP_USER, challenge)) {
+                if (SECURITY_SERVER_PLUGIN_SUCCESS != m_pluginHandler.login(zone, APP_USER, challenge)) {
                     LogError("The password was rejected by plugin.");
                 }
             }
@@ -153,7 +162,8 @@ int PasswordService::processCheckFunctions(PasswordHdrs hdr, MessageBuffer& buff
     return result;
 }
 
-int PasswordService::processSetFunctions(PasswordHdrs hdr, MessageBuffer& buffer)
+int PasswordService::processSetFunctions(PasswordHdrs hdr, MessageBuffer& buffer,
+                                          const std::string &zone, bool &isPwdReused)
 {
     int result = SECURITY_SERVER_API_ERROR_SERVER_ERROR;
 
@@ -166,24 +176,29 @@ int PasswordService::processSetFunctions(PasswordHdrs hdr, MessageBuffer& buffer
             Deserialization::Deserialize(buffer, newPwd);
             Deserialization::Deserialize(buffer, rec_att);
             Deserialization::Deserialize(buffer, rec_days);
-            result = m_pwdManager.setPassword(curPwd, newPwd, rec_att, rec_days, m_pluginHandler);
+            result = m_pwdManager.setPassword(zone, curPwd, newPwd, rec_att, rec_days, m_pluginHandler);
             break;
 
         case PasswordHdrs::HDR_SET_PWD_VALIDITY:
             Deserialization::Deserialize(buffer, rec_days);
-            result = m_pwdManager.setPasswordValidity(rec_days);
+            result = m_pwdManager.setPasswordValidity(zone, rec_days);
             break;
 
         case PasswordHdrs::HDR_SET_PWD_MAX_CHALLENGE:
             Deserialization::Deserialize(buffer, rec_max_challenge);
-            result = m_pwdManager.setPasswordMaxChallenge(rec_max_challenge);
+            result = m_pwdManager.setPasswordMaxChallenge(zone, rec_max_challenge);
             break;
 
         case PasswordHdrs::HDR_SET_PWD_HISTORY:
             Deserialization::Deserialize(buffer, rec_history);
-            result = m_pwdManager.setPasswordHistory(rec_history);
+            result = m_pwdManager.setPasswordHistory(zone, rec_history);
             break;
 
+        case PasswordHdrs::HDR_IS_PWD_REUSED: {
+                std::string pwd;
+                Deserialization::Deserialize(buffer, pwd);
+                result = m_pwdManager.isPwdReused(zone, pwd, isPwdReused);
+            } break;
         default:
             LogError("Unknown msg header.");
             Throw(Exception::IncorrectHeader);
@@ -192,7 +207,8 @@ int PasswordService::processSetFunctions(PasswordHdrs hdr, MessageBuffer& buffer
     return result;
 }
 
-int PasswordService::processResetFunctions(PasswordHdrs hdr, MessageBuffer& buffer)
+int PasswordService::processResetFunctions(PasswordHdrs hdr, MessageBuffer& buffer,
+                                            const std::string &zone)
 {
     int result = SECURITY_SERVER_API_ERROR_SERVER_ERROR;
 
@@ -204,7 +220,7 @@ int PasswordService::processResetFunctions(PasswordHdrs hdr, MessageBuffer& buff
             Deserialization::Deserialize(buffer, newPwd);
             Deserialization::Deserialize(buffer, rec_att);
             Deserialization::Deserialize(buffer, rec_days);
-            result = m_pwdManager.resetPassword(newPwd, rec_att, rec_days, m_pluginHandler);
+            result = m_pwdManager.resetPassword(zone, newPwd, rec_att, rec_days, m_pluginHandler);
             break;
 
         default:
@@ -222,8 +238,10 @@ bool PasswordService::processOne(const ConnectionID &conn, MessageBuffer &buffer
 
     MessageBuffer sendBuffer;
 
+    std::string zone;
     int retCode = SECURITY_SERVER_API_ERROR_SERVER_ERROR;
     unsigned int cur_att = 0, max_att = 0, exp_time = 0;
+    bool isPwdReused;
 
     if (!buffer.Ready())
         return false;
@@ -233,18 +251,28 @@ bool PasswordService::processOne(const ConnectionID &conn, MessageBuffer &buffer
         Deserialization::Deserialize(buffer, tempHdr);
         PasswordHdrs hdr = static_cast<PasswordHdrs>(tempHdr);
 
+        // Find zone name by client sock fd.
+        if(lookup_zone_by_sockfd(conn.sock, zone)) {
+            retCode = SECURITY_SERVER_API_ERROR_GETTING_ZONE_INFO_FAILED;
+            goto send;
+        }
+        if(strcmp(zone.c_str(), "host") == 0)
+            zone_get_default_zone(zone);
+
+        LogInfo("Zone(" << zone << ") is found");
+
         try {   //try..catch for internal service errors, assigns error code for returning.
             switch (interfaceID) {
                 case SOCKET_ID_CHECK:
-                    retCode = processCheckFunctions(hdr, buffer, cur_att, max_att, exp_time);
+                    retCode = processCheckFunctions(hdr, buffer, zone, cur_att, max_att, exp_time);
                     break;
 
                 case SOCKET_ID_SET:
-                    retCode = processSetFunctions(hdr, buffer);
+                    retCode = processSetFunctions(hdr, buffer, zone, isPwdReused);
                     break;
 
                 case SOCKET_ID_RESET:
-                    retCode = processResetFunctions(hdr, buffer);
+                    retCode = processResetFunctions(hdr, buffer, zone);
                     break;
 
                 default:
@@ -259,6 +287,7 @@ bool PasswordService::processOne(const ConnectionID &conn, MessageBuffer &buffer
             retCode = SECURITY_SERVER_API_ERROR_SERVER_ERROR;
         }
 
+send:
         //everything is OK, send return code and extra data
         Serialization::Serialize(sendBuffer, retCode);
 
@@ -272,6 +301,7 @@ bool PasswordService::processOne(const ConnectionID &conn, MessageBuffer &buffer
             case SECURITY_SERVER_API_ERROR_PASSWORD_MISMATCH:
             case SECURITY_SERVER_API_ERROR_PASSWORD_MAX_ATTEMPTS_EXCEEDED:
             case SECURITY_SERVER_API_ERROR_PASSWORD_EXPIRED:
+            case SECURITY_SERVER_API_ERROR_GETTING_ZONE_INFO_FAILED:
                 Serialization::Serialize(sendBuffer, cur_att);
                 Serialization::Serialize(sendBuffer, max_att);
                 Serialization::Serialize(sendBuffer, exp_time);
@@ -288,6 +318,10 @@ bool PasswordService::processOne(const ConnectionID &conn, MessageBuffer &buffer
             default:
                 break;
             }
+        } else if (interfaceID == SOCKET_ID_SET) {
+            if (hdr == PasswordHdrs::HDR_IS_PWD_REUSED && retCode == SECURITY_SERVER_API_SUCCESS) {
+                Serialization::Serialize(sendBuffer, (int)isPwdReused);
+            }
         }
 
         m_serviceManager->Write(conn, sendBuffer.Pop());
@@ -300,8 +334,6 @@ bool PasswordService::processOne(const ConnectionID &conn, MessageBuffer &buffer
         m_serviceManager->Close(conn);
         return false;
     }
-
-
 
     return true;
 }

@@ -90,8 +90,8 @@ public:
 
     virtual ~ServiceThread()
     {
-        if (m_state != State::NoThread)
-            Join();
+        assert((m_state == State::NoThread) && "You must stop thread before destruction!");
+
         while (!m_eventQueue.empty()){
             auto front = m_eventQueue.front();
             delete front.eventPtr;

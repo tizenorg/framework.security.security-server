@@ -88,6 +88,38 @@ int security_server_is_pwd_valid(unsigned int *current_attempts,
 }
 
 SECURITY_SERVER_API
+int security_server_is_pwd_reused(const char *pwd, int *is_reused)
+{
+    using namespace SecurityServer;
+
+    return try_catch([&] {
+        if (NULL == pwd || NULL == is_reused) {
+            LogError("Wrong input param");
+            return SECURITY_SERVER_API_ERROR_INPUT_PARAM;
+        }
+
+        MessageBuffer send, recv;
+
+        Serialization::Serialize(send, static_cast<int>(PasswordHdrs::HDR_IS_PWD_REUSED));
+        Serialization::Serialize(send, std::string(pwd));
+
+        int retCode = sendToServer(SERVICE_SOCKET_PASSWD_SET, send.Pop(), recv);
+        if (SECURITY_SERVER_API_SUCCESS != retCode) {
+            LogDebug("Error in sendToServer. Error code: " << retCode);
+            return retCode;
+        }
+
+        Deserialization::Deserialize(recv, retCode);
+
+        if (SECURITY_SERVER_API_SUCCESS == retCode) {
+            Deserialization::Deserialize(recv, *is_reused);
+        }
+
+        return retCode;
+    });
+}
+
+SECURITY_SERVER_API
 int security_server_chk_pwd(const char *challenge,
                             unsigned int *current_attempts,
                             unsigned int *max_attempts,
@@ -113,7 +145,11 @@ int security_server_chk_pwd(const char *challenge,
         *valid_secs = 0;
 
         Serialization::Serialize(send, static_cast<int>(PasswordHdrs::HDR_CHK_PWD));
-        Serialization::Serialize(send, std::string(challenge));
+
+        //Clear pwd memory
+        std::string challenge_str(challenge);
+        Serialization::Serialize(send, challenge_str);
+        challenge_str.clear();
 
         int retCode = sendToServer(SERVICE_SOCKET_PASSWD_CHECK, send.Pop(), recv);
         if (SECURITY_SERVER_API_SUCCESS != retCode) {

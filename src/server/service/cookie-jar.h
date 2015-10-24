@@ -43,7 +43,8 @@ enum class CompareType
     SMACKLABEL,
     PERMISSIONS,
     UID,
-    GID
+    GID,
+    ZONE
 };
 
 
@@ -53,6 +54,7 @@ struct Cookie
     pid_t pid;                      //owner PID
     uid_t uid;                      //owner UID
     gid_t gid;                      //owner GID
+    std::string zone;               //owner Zone
     std::string binaryPath;         //path to owner binary
     std::string smackLabel;         //owner SMACK label
     std::vector<int> permissions;   //owner GIDs

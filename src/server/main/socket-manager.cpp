@@ -45,11 +45,12 @@
 
 #include <error-description.h>
 #include <smack-check.h>
+#include <zone-check.h>
 #include <socket-manager.h>
 
 namespace {
 
-const time_t SOCKET_TIMEOUT = 20;
+const time_t SOCKET_TIMEOUT = 300;
 
 } // namespace anonymous
 
@@ -59,6 +60,10 @@ struct DummyService : public GenericSocketService {
     ServiceDescriptionVector GetServiceDescription() {
         return ServiceDescriptionVector();
     }
+
+    void Start() {}
+    void Stop() {}
+
     void Event(const AcceptEvent &event) { (void)event; }
     void Event(const WriteEvent &event) { (void)event; }
     void Event(const ReadEvent &event) { (void)event; }
@@ -79,6 +84,9 @@ struct SignalService : public GenericSocketService {
     ServiceDescriptionVector GetServiceDescription() {
         return ServiceDescriptionVector();
     }
+
+    void Start() {}
+    void Stop() {}
 
     void Event(const AcceptEvent &event) { (void)event; } // not supported
     void Event(const WriteEvent &event) { (void)event; }  // not supported
@@ -182,9 +190,10 @@ SocketManager::~SocketManager() {
             serviceMap.insert(m_socketDescriptionVector[i].service);
 
     // Time to destroy all services.
-    for(auto it = serviceMap.begin(); it != serviceMap.end(); ++it) {
-        LogDebug("delete " << (void*)(*it));
-        delete *it;
+    for(auto service : serviceMap) {
+        LogDebug("delete " << (void*)(service));
+        service->Stop();
+        delete service;
     }
 
     for (size_t i = 0; i < m_socketDescriptionVector.size(); ++i)
@@ -458,6 +467,7 @@ int SocketManager::GetSocketFromSystemD(
     const GenericSocketService::ServiceDescription &desc)
 {
     int fd;
+    int ret = 0;
 
     // TODO optimalization - do it once in object constructor
     //                       and remember all information path->sockfd
@@ -476,6 +486,11 @@ int SocketManager::GetSocketFromSystemD(
         {
             LogInfo("Useable socket " << desc.serviceHandlerPath <<
                 " was passed by SystemD under descriptor " << fd);
+
+            ret = zone_declare_link(desc.serviceHandlerPath, desc.serviceHandlerPath);
+            if(ret != 0)
+                LogError("Failed to socket decleare link: " << desc.serviceHandlerPath);
+
             return fd;
         }
     }
@@ -487,6 +502,7 @@ int SocketManager::CreateDomainSocketHelp(
     const GenericSocketService::ServiceDescription &desc)
 {
     int sockfd;
+    int ret = 0;
 
     GenericSocketService::ServiceHandlerPath::size_type maxlen =
             sizeof(static_cast<sockaddr_un*>(nullptr)->sun_path) /
@@ -540,6 +556,10 @@ int SocketManager::CreateDomainSocketHelp(
         LogError("Error in bind: " << errnoToString(err));
         ThrowMsg(Exception::InitFailed, "Error in bind: " << errnoToString(err));
     }
+
+    ret = zone_declare_link(desc.serviceHandlerPath, desc.serviceHandlerPath);
+    if(ret != 0)
+        LogError("Failed to socket decleare link: " << desc.serviceHandlerPath);
 
     umask(originalUmask);
 

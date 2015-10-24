@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2000 - 2013 Samsung Electronics Co., Ltd All Rights Reserved
+ *  Copyright (c) 2000 - 2015 Samsung Electronics Co., Ltd All Rights Reserved
  *
  *  Contact: Bumjin Im <bj.im@samsung.com>
  *
@@ -37,6 +37,7 @@
 #include <error-description.h>
 #include <message-buffer.h>
 #include <security-server.h>
+#include <client-common.h>
 
 IMPLEMENT_SAFE_SINGLETON(SecurityServer::Log::LogSystem);
 
@@ -68,122 +69,95 @@ int waitForSocket(int sock, int event, int timeout) {
     return retval;
 }
 
-class SockRAII {
-public:
-    SockRAII()
-      : m_sock(-1)
-    {}
+} // namespace anonymous
 
-    virtual ~SockRAII() {
-        if (m_sock > -1)
-            close(m_sock);
+namespace SecurityServer {
+
+
+int SockRAII::Connect(char const * const interface) {
+    sockaddr_un clientAddr;
+    int flags;
+
+    if (m_sock != -1) // guard
+        close(m_sock);
+
+    m_sock = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (m_sock < 0) {
+        int err = errno;
+        LogError("Error creating socket: " << SecurityServer::errnoToString(err));
+        return SECURITY_SERVER_API_ERROR_SOCKET;
     }
 
-    int Connect(char const * const interface) {
-        sockaddr_un clientAddr;
-        int flags;
+    if ((flags = fcntl(m_sock, F_GETFL, 0)) < 0 ||
+        fcntl(m_sock, F_SETFL, flags | O_NONBLOCK) < 0)
+    {
+        int err = errno;
+        LogError("Error in fcntl: " << SecurityServer::errnoToString(err));
+        return SECURITY_SERVER_API_ERROR_SOCKET;
+    }
 
-        if (m_sock != -1) // guard
-            close(m_sock);
+    memset(&clientAddr, 0, sizeof(clientAddr));
 
-        m_sock = socket(AF_UNIX, SOCK_STREAM, 0);
-        if (m_sock < 0) {
-            int err = errno;
-            LogError("Error creating socket: " << SecurityServer::errnoToString(err));
+    clientAddr.sun_family = AF_UNIX;
+
+    if (strlen(interface) >= sizeof(clientAddr.sun_path)) {
+        LogError("Error: interface name " << interface << "is too long. Max len is:" << sizeof(clientAddr.sun_path));
+        return SECURITY_SERVER_API_ERROR_SOCKET;
+    }
+
+    strcpy(clientAddr.sun_path, interface);
+
+    LogDebug("ClientAddr.sun_path = " << interface);
+
+    int retval = TEMP_FAILURE_RETRY(connect(m_sock, (struct sockaddr*)&clientAddr, SUN_LEN(&clientAddr)));
+    if ((retval == -1) && (errno == EINPROGRESS)) {
+        if (0 >= waitForSocket(m_sock, POLLOUT, POLL_TIMEOUT)) {
+            LogError("Error in waitForSocket.");
             return SECURITY_SERVER_API_ERROR_SOCKET;
         }
-
-        if ((flags = fcntl(m_sock, F_GETFL, 0)) < 0 ||
-            fcntl(m_sock, F_SETFL, flags | O_NONBLOCK) < 0)
-        {
-            int err = errno;
-            LogError("Error in fcntl: " << SecurityServer::errnoToString(err));
-            return SECURITY_SERVER_API_ERROR_SOCKET;
-        }
-
-        memset(&clientAddr, 0, sizeof(clientAddr));
-
-        clientAddr.sun_family = AF_UNIX;
-
-        if (strlen(interface) >= sizeof(clientAddr.sun_path)) {
-            LogError("Error: interface name " << interface << "is too long. Max len is:" << sizeof(clientAddr.sun_path));
-            return SECURITY_SERVER_API_ERROR_SOCKET;
-        }
-
-        strcpy(clientAddr.sun_path, interface);
-
-        LogDebug("ClientAddr.sun_path = " << interface);
-
-        int retval = TEMP_FAILURE_RETRY(connect(m_sock, (struct sockaddr*)&clientAddr, SUN_LEN(&clientAddr)));
-        if ((retval == -1) && (errno == EINPROGRESS)) {
-            if (0 >= waitForSocket(m_sock, POLLOUT, POLL_TIMEOUT)) {
-                LogError("Error in waitForSocket.");
-                return SECURITY_SERVER_API_ERROR_SOCKET;
-            }
-            int error = 0;
-            size_t len = sizeof(error);
-            retval = getsockopt(m_sock, SOL_SOCKET, SO_ERROR, &error, &len);
-
-            if (-1 == retval) {
-                int err = errno;
-                LogError("Error in getsockopt: " << SecurityServer::errnoToString(err));
-                return SECURITY_SERVER_API_ERROR_SOCKET;
-            }
-
-            if (error == EACCES) {
-                LogError("Access denied");
-                return SECURITY_SERVER_API_ERROR_ACCESS_DENIED;
-            }
-
-            if (error != 0) {
-                LogError("Error in connect: " << SecurityServer::errnoToString(error));
-                return SECURITY_SERVER_API_ERROR_SOCKET;
-            }
-
-            return SECURITY_SERVER_API_SUCCESS;
-        }
+        int error = 0;
+        size_t len = sizeof(error);
+        retval = getsockopt(m_sock, SOL_SOCKET, SO_ERROR, &error, &len);
 
         if (-1 == retval) {
             int err = errno;
-            LogError("Error connecting socket: " << SecurityServer::errnoToString(err));
-            if (err == EACCES)
-                return SECURITY_SERVER_API_ERROR_ACCESS_DENIED;
+            LogError("Error in getsockopt: " << SecurityServer::errnoToString(err));
+            return SECURITY_SERVER_API_ERROR_SOCKET;
+        }
+
+        if (error == EACCES) {
+            LogError("Access denied");
+            return SECURITY_SERVER_API_ERROR_ACCESS_DENIED;
+        }
+
+        if (error != 0) {
+            LogError("Error in connect: " << SecurityServer::errnoToString(error));
             return SECURITY_SERVER_API_ERROR_SOCKET;
         }
 
         return SECURITY_SERVER_API_SUCCESS;
     }
 
-    int Get() {
-        return m_sock;
+    if (-1 == retval) {
+        int err = errno;
+        LogError("Error connecting socket: " << SecurityServer::errnoToString(err));
+        if (err == EACCES)
+            return SECURITY_SERVER_API_ERROR_ACCESS_DENIED;
+        return SECURITY_SERVER_API_ERROR_SOCKET;
     }
 
-private:
-    int m_sock;
-};
+    return SECURITY_SERVER_API_SUCCESS;
+}
 
-} // namespace anonymous
-
-namespace SecurityServer {
-
-
-int sendToServer(char const * const interface, const RawBuffer &send, MessageBuffer &recv) {
-    int ret;
-    SockRAII sock;
+int sendToServerWithFd(int fd, const RawBuffer &send, MessageBuffer &recv) {
     ssize_t done = 0;
     char buffer[2048];
-
-    if (SECURITY_SERVER_API_SUCCESS != (ret = sock.Connect(interface))) {
-        LogError("Error in SockRAII");
-        return ret;
-    }
-
     while ((send.size() - done) > 0) {
-        if (0 >= waitForSocket(sock.Get(), POLLOUT, POLL_TIMEOUT)) {
+        if (0 >= waitForSocket(fd, POLLOUT, POLL_TIMEOUT)) {
             LogError("Error in poll(POLLOUT)");
             return SECURITY_SERVER_API_ERROR_SOCKET;
         }
-        ssize_t temp = TEMP_FAILURE_RETRY(write(sock.Get(), &send[done], send.size() - done));
+        ssize_t temp = TEMP_FAILURE_RETRY(write(fd, &send[done], send.size() - done));
         if (-1 == temp) {
             int err = errno;
             LogError("Error in write: " << errnoToString(err));
@@ -193,11 +167,11 @@ int sendToServer(char const * const interface, const RawBuffer &send, MessageBuf
     }
 
     do {
-        if (0 >= waitForSocket(sock.Get(), POLLIN, POLL_TIMEOUT)) {
+        if (0 >= waitForSocket(fd, POLLIN, POLL_TIMEOUT)) {
             LogError("Error in poll(POLLIN)");
             return SECURITY_SERVER_API_ERROR_SOCKET;
         }
-        ssize_t temp = TEMP_FAILURE_RETRY(read(sock.Get(), buffer, 2048));
+        ssize_t temp = TEMP_FAILURE_RETRY(read(fd, buffer, 2048));
         if (-1 == temp) {
             int err = errno;
             LogError("Error in read: " << errnoToString(err));
@@ -213,6 +187,18 @@ int sendToServer(char const * const interface, const RawBuffer &send, MessageBuf
         recv.Push(raw);
     } while(!recv.Ready());
     return SECURITY_SERVER_API_SUCCESS;
+}
+
+int sendToServer(char const * const interface, const RawBuffer &send, MessageBuffer &recv) {
+    int ret;
+    SockRAII sock;
+
+    if (SECURITY_SERVER_API_SUCCESS != (ret = sock.Connect(interface))) {
+        LogError("Error in SockRAII");
+        return ret;
+    }
+
+    return sendToServerWithFd(sock.Get(), send, recv);
 }
 
 int sendToServerAncData(char const * const interface, const RawBuffer &send, struct msghdr &hdr) {
@@ -266,6 +252,9 @@ int try_catch(const std::function<int()>& func)
         return func();
     } catch (MessageBuffer::Exception::Base &e) {
         LogError("SecurityServer::MessageBuffer::Exception " << e.DumpToString());
+    } catch (std::bad_alloc &e) {
+        LogError("Memory allocation failed " << e.what());
+        return SECURITY_SERVER_API_ERROR_OUT_OF_MEMORY;
     } catch (std::exception &e) {
         LogError("STD exception " << e.what());
     } catch (...) {

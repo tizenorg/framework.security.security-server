@@ -31,7 +31,7 @@
 #include <algorithm>
 #include <dirent.h>
 #include <sys/stat.h>
-#include <security-server.h>
+#include <security-server-error.h>
 #include <security-server-util.h>
 #include <fcntl.h>
 #include <sys/inotify.h>
@@ -120,6 +120,14 @@ OpenForService::~OpenForService()
     ::close(m_inotify_watch_fd);
 }
 
+void OpenForService::Start() {
+    Create();
+}
+
+void OpenForService::Stop() {
+    Join();
+}
+
 OpenForService::OpenForConnInfo::~OpenForConnInfo() {
     std::for_each(descriptorsVector.begin(),descriptorsVector.end(), ::close);
 }
@@ -186,8 +194,7 @@ void OpenForService::close(const CloseEvent &event)
 }
 
 int OpenForService::addWatchToDirectory(const std::string &filename,
-                                        const std::string &client_label,
-                                        int & fd)
+                                        const std::string &client_label)
 {
     // add watch to the directory
     std::string dir_path = SharedFile::generateDirPath(client_label);
@@ -262,7 +269,7 @@ bool OpenForService::processOne(const ConnectionID &conn,
                 break;
 
             // add watch to the directory [cleanup fd on error]
-            retCode = addWatchToDirectory(filename, client_label, fd);
+            retCode = addWatchToDirectory(filename, client_label);
             if(retCode) {
                 LogError("Error adding watch to file: " << filename);
                 m_sharedFile.deleteFile(client_label, filename);

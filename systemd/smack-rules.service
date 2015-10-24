@@ -1,0 +1,13 @@
+[Unit]
+Description=SMACK rules loading
+ConditionSecurity=smack
+Before=starter.service
+
+[Service]
+Type=oneshot
+ExecStart = /usr/bin/load-rules.sh
+ExecStartPost = /bin/chown root:system /opt/dbspace/.rules-db.db3 ; /bin/chmod 664 /opt/dbspace/.rules-db.db3
+ExecStartPost = /bin/chown root:system /opt/dbspace/.rules-db.db3-journal ; /bin/chmod 664 /opt/dbspace/.rules-db.db3-journal
+
+[Install]
+WantedBy=multi-user.target

@@ -56,6 +56,9 @@ namespace SecurityServer
         //service functions
         ServiceDescriptionVector GetServiceDescription();
 
+        void Start();
+        void Stop();
+
         DECLARE_THREAD_EVENT(AcceptEvent, accept)
         DECLARE_THREAD_EVENT(WriteEvent, write)
         DECLARE_THREAD_EVENT(ReadEvent, process)
@@ -69,10 +72,12 @@ namespace SecurityServer
     private:
         //internal service functions
         bool processOne(const ConnectionID &conn, MessageBuffer &buffer, InterfaceID interfaceID);
-        int processCheckFunctions(PasswordHdrs hdr, MessageBuffer& buffer, unsigned int &cur_att,
-                                   unsigned int &max_att, unsigned int &exp_time);
-        int processSetFunctions(PasswordHdrs hdr, MessageBuffer& buffer);
-        int processResetFunctions(PasswordHdrs hdr, MessageBuffer& buffer);
+        int processCheckFunctions(PasswordHdrs hdr, MessageBuffer& buffer, const std::string &zone,
+                                  unsigned int &cur_att, unsigned int &max_att,
+                                  unsigned int &exp_time);
+        int processSetFunctions(PasswordHdrs hdr, MessageBuffer& buffer, const std::string &zone,
+                                bool &isPwdReused);
+        int processResetFunctions(PasswordHdrs hdr, MessageBuffer& buffer, const std::string &zone);
 
         // service attributes
         PasswordManager m_pwdManager;

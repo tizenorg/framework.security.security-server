@@ -5,6 +5,7 @@ INSTALL(FILES
     ${CMAKE_SOURCE_DIR}/systemd/security-server-get-gid.socket
     ${CMAKE_SOURCE_DIR}/systemd/security-server-privilege-by-pid.socket
     ${CMAKE_SOURCE_DIR}/systemd/security-server-app-permissions.socket
+    ${CMAKE_SOURCE_DIR}/systemd/security-server-permissions.socket
     ${CMAKE_SOURCE_DIR}/systemd/security-server-cookie-get.socket
     ${CMAKE_SOURCE_DIR}/systemd/security-server-cookie-check.socket
     ${CMAKE_SOURCE_DIR}/systemd/security-server-app-privilege-by-name.socket
@@ -13,6 +14,9 @@ INSTALL(FILES
     ${CMAKE_SOURCE_DIR}/systemd/security-server-password-reset.socket
     ${CMAKE_SOURCE_DIR}/systemd/security-server-password-check.socket
     ${CMAKE_SOURCE_DIR}/systemd/security-server-password-set.socket
+    ${CMAKE_SOURCE_DIR}/systemd/security-server-label.socket
+    ${CMAKE_SOURCE_DIR}/systemd/smack-rules.service
+    ${CMAKE_SOURCE_DIR}/systemd/smack-default-labeling.service
     DESTINATION
     /usr/lib/systemd/system
 )

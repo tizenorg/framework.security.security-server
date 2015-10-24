@@ -42,6 +42,9 @@ public:
 
     ServiceDescriptionVector GetServiceDescription();
 
+    void Start();
+    void Stop();
+
     DECLARE_THREAD_EVENT(AcceptEvent, accept)
     DECLARE_THREAD_EVENT(WriteEvent, write)
     DECLARE_THREAD_EVENT(ReadEvent, process)
@@ -64,6 +67,7 @@ private:
 
     bool uidByCookieRequest(MessageBuffer &buffer, MessageBuffer &send);
     bool gidByCookieRequest(MessageBuffer &buffer, MessageBuffer &send);
+    bool zoneByCookieRequest(MessageBuffer &buffer, MessageBuffer &send);
 
     CookieJar m_cookieJar;
 

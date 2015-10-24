@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2000 - 2013 Samsung Electronics Co., Ltd All Rights Reserved
+ *  Copyright (c) 2000 - 2015 Samsung Electronics Co., Ltd All Rights Reserved
  *
  *  Contact: Bumjin Im <bj.im@samsung.com>
  *
@@ -46,6 +46,12 @@ struct ConnectionID {
     inline bool operator<(const ConnectionID &second) const {
         return counter < second.counter;
     }
+    inline bool operator==(const ConnectionID &second) const {
+        return counter == second.counter;
+    }
+    inline bool operator!=(const ConnectionID &second) const {
+        return counter != second.counter;
+    }
 };
 
 typedef std::vector<unsigned char> RawBuffer;
@@ -77,7 +83,7 @@ struct GenericSocketService {
             fileDesc(fileDesc)
         {}
 
-        typedef enum ServiceType {
+        enum ServiceType {
             SOCKET_SERVICE = 0,
             FILE_DESC_SERVICE
         };
@@ -121,6 +127,10 @@ struct GenericSocketService {
     }
 
     virtual ServiceDescriptionVector GetServiceDescription() = 0;
+
+    virtual void Start() = 0;
+    virtual void Stop() = 0;
+
     virtual void Event(const AcceptEvent &event) = 0;
     virtual void Event(const WriteEvent &event) = 0;
     virtual void Event(const ReadEvent &event) = 0;

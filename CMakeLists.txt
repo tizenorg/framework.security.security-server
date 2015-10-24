@@ -1,4 +1,4 @@
-# Copyright (c) 2011 Samsung Electronics Co., Ltd All Rights Reserved
+# Copyright (c) 2011-2015 Samsung Electronics Co., Ltd All Rights Reserved
 #
 #    Licensed under the Apache License, Version 2.0 (the "License");
 #    you may not use this file except in compliance with the License.
@@ -16,6 +16,17 @@
 # @author
 # @brief
 #
+############################# Set Tizen version ###############################
+
+SET(TIZEN_VERSION  \"2.4\")
+
+IF("${PROFILE_TYPE}" STREQUAL "WEARABLE")
+    ADD_DEFINITIONS("-DPROFILE_TYPE_WEARABLE")
+ELSEIF("${PROFILE_TYPE}" STREQUAL "MOBILE")
+    ADD_DEFINITIONS("-DPROFILE_TYPE_MOBILE")
+ELSEIF("${PROFILE_TYPE}" STREQUAL "TV")
+    ADD_DEFINITIONS("-DPROFILE_TYPE_TV")
+ENDIF()
 
 ############################# Check minimum CMake version #####################
 
@@ -28,10 +39,10 @@ INCLUDE(FindPkgConfig)
 
 ############################# compiler flags ##################################
 
-SET(CMAKE_C_FLAGS_PROFILING    "-g -O0 -pg")
-SET(CMAKE_CXX_FLAGS_PROFILING  "-g -std=c++0x -O0 -pg")
-SET(CMAKE_C_FLAGS_DEBUG        "-g -O0 -ggdb")
-SET(CMAKE_CXX_FLAGS_DEBUG      "-g -std=c++0x -O0 -ggdb")
+SET(CMAKE_C_FLAGS_PROFILING    "-g -O0 -pg -Wp,-U_FORTIFY_SOURCE")
+SET(CMAKE_CXX_FLAGS_PROFILING  "-g -std=c++0x -O0 -pg -Wp,-U_FORTIFY_SOURCE")
+SET(CMAKE_C_FLAGS_DEBUG        "-g -O0 -ggdb -Wp,-U_FORTIFY_SOURCE")
+SET(CMAKE_CXX_FLAGS_DEBUG      "-g -std=c++0x -O0 -ggdb -Wp,-U_FORTIFY_SOURCE")
 SET(CMAKE_C_FLAGS_RELEASE      "-g -O2")
 SET(CMAKE_CXX_FLAGS_RELEASE    "-g -std=c++0x -O2")
 SET(CMAKE_C_FLAGS_CCOV         "-g -O2 --coverage")
@@ -51,11 +62,23 @@ ADD_DEFINITIONS("-Wextra")                      # Generate even more extra warni
 STRING(REGEX MATCH "([^.]*)" API_VERSION "${VERSION}")
 ADD_DEFINITIONS("-DAPI_VERSION=\"$(API_VERSION)\"")
 ADD_DEFINITIONS("-DSMACK_ENABLED")
+ADD_DEFINITIONS("-DTIZEN_VERSION=${TIZEN_VERSION}")
+SET(CACHE_DIR  \"/opt/data/privilege-control-cache\")
+ADD_DEFINITIONS("-DCACHE_DIR=${CACHE_DIR}")
 
 IF (CMAKE_BUILD_TYPE MATCHES "DEBUG")
-    ADD_DEFINITIONS("-DTIZEN_DEBUG_ENABLE")
     ADD_DEFINITIONS("-DBUILD_TYPE_DEBUG")
+    ADD_DEFINITIONS("-DDLOG_WARN_ENABLED")
+    ADD_DEFINITIONS("-DDLOG_ERROR_ENABLED")
 ENDIF (CMAKE_BUILD_TYPE MATCHES "DEBUG")
+
+IF (TIZEN_ZONE_ENABLED)
+    ADD_DEFINITIONS("-DZONE_ENABLED")
+ENDIF (TIZEN_ZONE_ENABLED)
+
+IF (SECCOMP_ENABLED MATCHES "ON")
+    ADD_DEFINITIONS("-DSECCOMP_ENABLED")
+ENDIF (SECCOMP_ENABLED MATCHES "ON")
 
 SET(TARGET_SECURITY_SERVER "security-server")
 SET(TARGET_SECURITY_CLIENT "security-server-client")
@@ -64,6 +87,7 @@ SET(TARGET_SERVER_COMMON "security-server-commons")
 INSTALL(FILES
     ${CMAKE_SOURCE_DIR}/packaging/libsecurity-server-client.manifest
     ${CMAKE_SOURCE_DIR}/packaging/security-server.manifest
+    ${CMAKE_SOURCE_DIR}/packaging/libprivilege-control-conf.manifest
     DESTINATION
     /usr/share
 )
@@ -71,3 +95,5 @@ INSTALL(FILES
 ADD_SUBDIRECTORY(src)
 ADD_SUBDIRECTORY(build)
 ADD_SUBDIRECTORY(systemd)
+ADD_SUBDIRECTORY(privilege-db)
+ADD_SUBDIRECTORY(privilege-conf)

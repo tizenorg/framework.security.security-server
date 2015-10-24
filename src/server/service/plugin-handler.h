@@ -38,11 +38,12 @@ public:
     PluginHandler& operator=(const PluginHandler&) = delete;
     bool fail() const;
 
-    int changeUserPassword(uid_t user, const std::string &oldPass, const std::string &newPass);
-    int login(uid_t user, const std::string &password);
-    int logout(uid_t user);
-    int resetUserPassword(uid_t user, const std::string &newPass);
-    int removeUserData(uid_t user);
+    int changeUserPassword(const std::string &zone, uid_t user, const std::string &oldPass,
+                           const std::string &newPass);
+    int login(const std::string &zone, uid_t user, const std::string &password);
+    int logout(const std::string &zone, uid_t user);
+    int resetUserPassword(const std::string &zone, uid_t user, const std::string &newPass);
+    int removeUserData(const std::string &zone, uid_t user);
 
     virtual ~PluginHandler();
 private:

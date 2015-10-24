@@ -1,8 +1,7 @@
-PKG_CHECK_MODULES(SECURITY_SERVER_DEP
+PKG_CHECK_MODULES(SECURITY_SERVER_COMMON_DEP
     dlog
     openssl
     libsmack
-    libprivilege-control
     libsystemd-daemon
     REQUIRED
     )
@@ -29,6 +28,8 @@ SET(SECURITY_SERVER_SOURCES
     ${SERVER2_PATH}/service/password-manager.cpp
     ${SERVER2_PATH}/service/password-file-buffer.cpp
     ${SERVER2_PATH}/service/plugin-handler.cpp
+    ${SERVER2_PATH}/service/transaction_manager.cpp
+    ${SERVER2_PATH}/service/label.cpp
     )
 
 SET_SOURCE_FILES_PROPERTIES(
@@ -37,7 +38,7 @@ SET_SOURCE_FILES_PROPERTIES(
         COMPILE_FLAGS "-D_GNU_SOURCE -fvisibility=hidden -fPIE")
 
 INCLUDE_DIRECTORIES(SYSTEM
-    ${SECURITY_SERVER_DEP_INCLUDE_DIRS}
+    ${SECURITY_SERVER_COMMON_DEP_INCLUDE_DIRS}
     )
 
 INCLUDE_DIRECTORIES(
@@ -47,12 +48,13 @@ INCLUDE_DIRECTORIES(
     ${SERVER2_PATH}/service
     ${SERVER2_PATH}/dpl/core/include
     ${SERVER2_PATH}/dpl/log/include
+    ${SERVER2_PATH}/privilege
     )
 
 ADD_EXECUTABLE(${TARGET_SECURITY_SERVER} ${SECURITY_SERVER_SOURCES})
 
 TARGET_LINK_LIBRARIES(${TARGET_SECURITY_SERVER}
-    ${SECURITY_SERVER_DEP_LIBRARIES}
+    ${SECURITY_SERVER_COMMON_DEP_LIBRARIES}
     ${TARGET_SERVER_COMMON} -pie -ldl
     )
 
@@ -78,6 +80,8 @@ SET(SECURITY_CLIENT_SOURCES
     ${SERVER2_PATH}/client/client-socket-privilege.cpp
     ${SERVER2_PATH}/client/client-open-for.cpp
     ${SERVER2_PATH}/client/client-password.cpp
+    ${SERVER2_PATH}/client/client-label.cpp
+    ${SERVER2_PATH}/client/client-domain.cpp
     )
 
 ADD_LIBRARY(${TARGET_SECURITY_CLIENT} SHARED ${SECURITY_CLIENT_SOURCES})
@@ -91,7 +95,7 @@ SET_TARGET_PROPERTIES(
     )
 
 TARGET_LINK_LIBRARIES(${TARGET_SECURITY_CLIENT}
-    ${SECURITY_SERVER_DEP_LIBRARIES}
+    ${SECURITY_SERVER_COMMON_DEP_LIBRARIES}
     ${TARGET_SERVER_COMMON}
     )
 
@@ -103,6 +107,9 @@ INSTALL(TARGETS ${TARGET_SECURITY_SERVER} DESTINATION bin)
 
 INSTALL(FILES
     ${SECURITY_SERVER_PATH}/include/security-server.h
+    ${SECURITY_SERVER_PATH}/include/security-server-error.h
+    ${SECURITY_SERVER_PATH}/include/security-server-perm.h
+    ${SECURITY_SERVER_PATH}/include/security-server-perm-types.h
     ${SECURITY_SERVER_PATH}/include/security-server-plugin-api.h
     DESTINATION /usr/include/security-server
     )
@@ -115,3 +122,6 @@ INSTALL(FILES
 ################################################################################
 
 ADD_SUBDIRECTORY(server)
+ADD_SUBDIRECTORY(api_feature_loader)
+ADD_SUBDIRECTORY(smack_rules_buffer)
+ADD_SUBDIRECTORY(ss_cleanup)

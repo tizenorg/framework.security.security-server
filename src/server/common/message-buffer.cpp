@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2000 - 2013 Samsung Electronics Co., Ltd All Rights Reserved
+ *  Copyright (c) 2000 - 2015 Samsung Electronics Co., Ltd All Rights Reserved
  *
  *  Contact: Bumjin Im <bj.im@samsung.com>
  *
@@ -59,6 +59,11 @@ void MessageBuffer::Read(size_t num, void *bytes) {
 
     m_buffer.FlattenConsume(bytes, num);
     m_bytesLeft -= num;
+}
+
+void MessageBuffer::Clear() {
+    CountBytesLeft();
+    m_buffer.Consume(m_bytesLeft);
 }
 
 void MessageBuffer::Write(size_t num, const void *bytes) {

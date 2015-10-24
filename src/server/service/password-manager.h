@@ -27,6 +27,7 @@
 #define _PASSWORDMANAGER_H_
 
 #include <string>
+#include <map>
 
 #include <password-file.h>
 #include <plugin-handler.h>
@@ -36,26 +37,35 @@ namespace SecurityServer
     class PasswordManager
     {
     public:
+        typedef std::map<std::string, PasswordFile> PasswordFileMap;
+
         //checking functions
-        int isPwdValid(unsigned int &currentAttempt, unsigned int &maxAttempt,
-                       unsigned int &expirationTime) const;
-        int checkPassword(const std::string& challenge, unsigned int &currentAttempt,
-                          unsigned int &maxAttempt, unsigned int &expTime);
+        int isPwdValid(const std::string &zone, unsigned int &currentAttempt,
+                       unsigned int &maxAttempt, unsigned int &expirationTime);
+        int isPwdReused(const std::string &zone, const std::string &pwd, bool &isReused);
+        int checkPassword(const std::string &zone, const std::string& challenge,
+                          unsigned int &currentAttempt, unsigned int &maxAttempt,
+                          unsigned int &expTime);
         //no const in checkPassword, attempts are updated
 
         //setting functions
-        int setPassword(const std::string &currentPassword, const std::string &newPassword,
-                        const unsigned int receivedAttempts, const unsigned int receivedDays,
-                        PluginHandler &plugin);
-        int setPasswordValidity(const unsigned int receivedDays);
-        int resetPassword(const std::string &newPassword, const unsigned int receivedAttempts,
-                          const unsigned int receivedDays,
+        int setPassword(const std::string &zone, const std::string &currentPassword,
+                        const std::string &newPassword, const unsigned int receivedAttempts,
+                        const unsigned int receivedDays, PluginHandler &plugin);
+        int setPasswordValidity(const std::string &zone, const unsigned int receivedDays);
+        int resetPassword(const std::string &zone, const std::string &newPassword,
+                          const unsigned int receivedAttempts, const unsigned int receivedDays,
                           PluginHandler &plugin);
-        int setPasswordHistory(const unsigned int history);
-        int setPasswordMaxChallenge(const unsigned int maxChallenge);
+        int setPasswordHistory(const std::string &zone, const unsigned int history);
+        int setPasswordMaxChallenge(const std::string &zone, const unsigned int maxChallenge);
 
     private:
-        PasswordFile m_pwdFile;
+        //managing functions
+        void addPassword(const std::string &zone);
+        void removePassword(const std::string &zone);
+        void existPassword(const std::string &zone);
+
+        PasswordFileMap m_pwdFile;
     };
 } //namespace SecurityServer
 

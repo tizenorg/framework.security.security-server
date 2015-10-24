@@ -6,6 +6,7 @@
 			<label name="security-server::db" />
 			<label name="security-server::api-app-permissions" />
 			<label name="security-server::api-app-privilege-by-name" />
+			<label name="security-server::api-permissions" />
 			<label name="security-server::api-cookie-check" />
 			<label name="security-server::api-cookie-get" />
 			<label name="security-server::api-data-share" />
@@ -18,6 +19,7 @@
 			<label name="security-server::api-password-reset" />
 			<label name="security-server::api-open-for" />
 			<label name="security-server::audit-files" />
+			<label name="security-server::label" />
 		</provide>
 	</define>
 	<request>
@@ -25,6 +27,12 @@
 	</request>
 	<assign>
 		<filesystem path="/etc/security/security-server-audit.conf" label="security-server::audit-files" />
-	    <filesystem path="/usr/bin/security-server" label="security-server" exec_label="security-server"/>
+		<filesystem path="/usr/bin/security-server" label="security-server" exec_label="security-server"/>
+		<filesystem path="/usr/bin/api_feature_loader" exec_label="none"/>
+		<filesystem path="/usr/share/privilege-control/db/updater.sh" exec_label="none"/>
+		<filesystem path="/usr/bin/smack_rules_buffer" exec_label="none"/>
+		<filesystem path="/usr/bin/load-rules.sh" exec_label="none"/>
+		<filesystem path="/usr/bin/sharing_cleanup" exec_label="none"/>
+		<filesystem path="/etc/opt/upgrade/220.libprivilege-updater.patch.sh" exec_label="none"/>
 	</assign>
 </manifest>

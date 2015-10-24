@@ -1,0 +1,63 @@
+#!/bin/sh
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+DBSPACE=/opt/usr/dbspace
+APPS_DIR=/opt/usr/apps
+SHARE_DIR=/opt/usr/share
+
+# Enable Smack ptrace option
+/bin/echo "1" > /smack/ptrace
+
+/usr/bin/chsmack -a "system::share" /dev/shm/
+/usr/bin/chsmack -t /dev/shm/
+if [ ! -e /opt/data/.smack_var_tmp.labeling ]; then
+	/usr/bin/chsmack -a "*" /var/tmp
+	/bin/touch /opt/data/.smack_var_tmp_labeling
+fi
+if [ ! -e /opt/data/.smack_var_log_labeling ]; then
+	/usr/bin/chsmack -a "system::sys_logging" /var/log
+	/bin/touch /opt/data/.smack_var_log_labeling
+fi
+
+/bin/chown 5000:5000 /opt/home/app
+/usr/bin/find /opt/home/app -print0 | xargs -0 chsmack -a 'system::homedir'
+/usr/bin/find /opt/home/app -type d -print0 | xargs -0 chsmack -t
+
+/bin/chown 200:200 /opt/home/system
+/usr/bin/find /opt/home/system -print0 | xargs -0 chsmack -a 'system::homedir'
+/usr/bin/find /opt/home/system -type d -print0 | xargs -0 chsmack -t
+
+/usr/bin/find /opt/home/root -print0 | xargs -0 chsmack -a 'system::homedir'
+/usr/bin/find /opt/home/root -type d -print0 | xargs -0 chsmack -t
+
+if [ ! -e /opt/home/app/.e ]; then
+	/bin/mkdir -p /opt/home/app/.e
+	/bin/chown 5000:5000 /opt/home/app/.e
+fi
+/usr/bin/find /opt/home/app/.e -print0 | xargs -0 chsmack -a 'e17::config'
+/usr/bin/find /opt/home/app/.e -type d -print0 | xargs -0 chsmack -t
+
+/usr/bin/find /opt/usr/media -print0 | xargs -0 chsmack -a 'system::media'
+/usr/bin/find /opt/usr/media -type d -print0 | xargs -0 chsmack -t
+
+# Default netlabel
+/bin/echo "0.0.0.0/1 system::use_internet" >> /smack/netlabel
+/bin/echo "128.0.0.0/1 system::use_internet" >> /smack/netlabel
+/bin/echo "10.0.2.2 system::debugging_network" >> /smack/netlabel
+/bin/echo "10.0.2.16 system::debugging_network" >> /smack/netlabel
+/bin/echo "127.0.0.1 -CIPSO" >> /smack/netlabel
+/bin/echo "192.168.129.3/32 system::debugging_network" >> /smack/netlabel
+/bin/echo "system::use_internet" > /smack/ambient
+
+if [ ! -e /opt/data/.smack_pre_labeling ]; then
+
+        # fontcache
+        /bin/mkdir -p /opt/var/cache/fontconfig
+        /usr/bin/chsmack -t /opt/var/cache/fontconfig
+        /usr/bin/chsmack -a "system::homedir" /opt/var/cache/fontconfig/*
+        /usr/bin/chsmack -a "system::homedir" /opt/var/cache/fontconfig
+
+        /bin/touch /opt/data/.smack_pre_labeling
+fi
+
+/usr/bin/chsmack -a '_' /opt/share/packages
+/usr/bin/chsmack -e '_' /sbin/ldconfig

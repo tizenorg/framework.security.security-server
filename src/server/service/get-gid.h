@@ -42,6 +42,9 @@ public:
 
     ServiceDescriptionVector GetServiceDescription();
 
+    void Start();
+    void Stop();
+
     DECLARE_THREAD_EVENT(AcceptEvent, accept)
     DECLARE_THREAD_EVENT(WriteEvent, write)
     DECLARE_THREAD_EVENT(ReadEvent, process)

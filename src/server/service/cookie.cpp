@@ -27,7 +27,7 @@
 #include <dpl/serialization.h>
 #include <protocols.h>
 #include <cookie-common.h>
-#include <security-server.h>
+#include <security-server-error.h>
 #include <security-server-util.h>
 #include <cookie.h>
 #include <smack-check.h>
@@ -49,6 +49,14 @@ GenericSocketService::ServiceDescriptionVector CookieService::GetServiceDescript
         {SERVICE_SOCKET_COOKIE_CHECK,     "security-server::api-cookie-check", INTERFACE_CHECK}
     };
  }
+
+void CookieService::Start() {
+    Create();
+}
+
+void CookieService::Stop() {
+    Join();
+}
 
 void CookieService::accept(const AcceptEvent &event) {
     LogDebug("Accept event. ConnectionID.sock: " << event.connectionID.sock
@@ -149,6 +157,11 @@ bool CookieService::processOne(const ConnectionID &conn, MessageBuffer &buffer, 
         case CookieCall::CHECK_GID:
             LogDebug("Entering get-gid-by-cookie side handler");
             retval = gidByCookieRequest(buffer, send);
+            break;
+
+        case CookieCall::CHECK_ZONE:
+            LogDebug("Entering get-zone-by-cookie side handler");
+            retval = zoneByCookieRequest(buffer, send);
             break;
 
         default:
@@ -325,7 +338,7 @@ bool CookieService::privilegeByCookieRequest(MessageBuffer &buffer, MessageBuffe
             subject = searchResult->smackLabel;
             int retval;
 
-            if ((retval = smack_pid_have_access(pid, object.c_str(), access.c_str())) == 1)
+            if ((retval = ss_smack_pid_have_access(pid, object.c_str(), access.c_str())) == 1)
                 Serialization::Serialize(send, (int)SECURITY_SERVER_API_SUCCESS);
             else {
                 Serialization::Serialize(send, (int)SECURITY_SERVER_API_ERROR_ACCESS_DENIED);
@@ -394,6 +407,32 @@ bool CookieService::gidByCookieRequest(MessageBuffer &buffer, MessageBuffer &sen
     if (searchResult != NULL) {
         Serialization::Serialize(send, (int)SECURITY_SERVER_API_SUCCESS);
         Serialization::Serialize(send, (int)searchResult->gid);
+    } else {
+        Serialization::Serialize(send, (int)SECURITY_SERVER_API_ERROR_NO_SUCH_COOKIE);
+    }
+
+    return true;
+}
+
+bool CookieService::zoneByCookieRequest(MessageBuffer &buffer, MessageBuffer &send)
+{
+    std::vector<char> cookieKey;
+
+    Try {
+        Deserialization::Deserialize(buffer, cookieKey);
+    } Catch (MessageBuffer::Exception::Base) {
+        LogDebug("Broken protocol. Closing socket.");
+        return false;
+    }
+
+    Cookie searchPattern;
+    searchPattern.cookieId = cookieKey;
+
+    const Cookie *searchResult = m_cookieJar.SearchCookie(searchPattern, CompareType::COOKIE_ID);
+
+    if (searchResult != NULL) {
+        Serialization::Serialize(send, (int)SECURITY_SERVER_API_SUCCESS);
+        Serialization::Serialize(send, searchResult->zone);
     } else {
         Serialization::Serialize(send, (int)SECURITY_SERVER_API_ERROR_NO_SUCH_COOKIE);
     }

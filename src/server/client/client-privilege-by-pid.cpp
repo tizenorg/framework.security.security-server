@@ -46,9 +46,8 @@ int security_server_check_privilege_by_pid(
         if (1 != smack_check())
             return SECURITY_SERVER_API_SUCCESS;
 
-        // Checking whether a process with pid exists
-        if ((pid < 0) || ((kill(pid, 0) == -1) && (errno == ESRCH))) {
-            LogDebug("pid is invalid, process: " << pid << " does not exist");
+        if (pid < 0) {
+            LogDebug("pid is invalid: " << pid);
             return SECURITY_SERVER_API_ERROR_INPUT_PARAM;
         }
 

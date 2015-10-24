@@ -36,6 +36,7 @@
 #include <privilege-by-pid.h>
 #include <app-permissions.h>
 #include <cookie.h>
+#include <label.h>
 #include <open-for.h>
 #include <password.h>
 
@@ -50,7 +51,7 @@ void registerSocketService(SecurityServer::SocketManager &manager, const std::st
     T *service = NULL;
     try {
         service = new T();
-        service->Create();
+        service->Start();
         manager.RegisterSocketService(service);
         service = NULL;
     } catch (const SecurityServer::Exception &exception) {
@@ -101,6 +102,7 @@ int main(void) {
         REGISTER_SOCKET_SERVICE(manager, SecurityServer::PrivilegeByPidService);
         REGISTER_SOCKET_SERVICE(manager, SecurityServer::AppPermissionsService);
         REGISTER_SOCKET_SERVICE(manager, SecurityServer::PasswordService);
+        REGISTER_SOCKET_SERVICE(manager, SecurityServer::LabelService);
 
         manager.MainLoop();
     }

@@ -1,0 +1,18 @@
+#!/bin/sh
+BIN_DIR=/usr/bin
+SET_CAP=/usr/sbin/setcap
+
+# Setting capability in case of first booting
+$SET_CAP cap_chown,cap_dac_override,cap_fowner,cap_setgid,cap_setuid,cap_lease,cap_mac_admin=eip $BIN_DIR/download-provider
+$SET_CAP cap_dac_override,cap_setgid,cap_setuid,cap_sys_admin=eip $BIN_DIR/scim
+$SET_CAP cap_dac_override,cap_mac_override,cap_net_admin=eip $BIN_DIR/telephony-daemon
+$SET_CAP cap_chown,cap_dac_override,cap_lease=eip $BIN_DIR/data-router
+$SET_CAP cap_chown,cap_dac_override,cap_fowner,cap_mac_override,cap_lease=eip $BIN_DIR/sound_server
+$SET_CAP cap_chown,cap_dac_override,cap_sys_admin,cap_lease,cap_mac_admin=eip $BIN_DIR/unifiedstorage-fs
+$SET_CAP cap_mac_override=eip $BIN_DIR/ss-server
+$SET_CAP cap_chown,cap_dac_override,cap_fsetid,cap_lease,cap_net_admin,cap_net_raw=eip $BIN_DIR/msg-server
+$SET_CAP cap_chown,cap_dac_override,cap_dac_read_search,cap_sys_admin,cap_sys_nice,cap_mac_override,cap_mac_admin=eip $BIN_DIR/data-provider-master
+$SET_CAP cap_chown,cap_dac_override,cap_lease,cap_mac_admin,cap_setgid,cap_setuid=eip $BIN_DIR/service-adaptor
+$SET_CAP cap_dac_override=eip $BIN_DIR/crash-manager
+
+/usr/bin/find /etc/smack -print0 | xargs -0 chsmack -a '_'

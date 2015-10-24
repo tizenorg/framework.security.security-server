@@ -1,7 +1,7 @@
 /*
  *  security-server
  *
- *  Copyright (c) 2000 - 2011 Samsung Electronics Co., Ltd All Rights Reserved
+ *  Copyright (c) 2000 - 2015 Samsung Electronics Co., Ltd All Rights Reserved
  *
  *  Contact: Bumjin Im <bj.im@samsung.com>
  *
@@ -23,7 +23,8 @@
 #define SECURITY_SERVER_H
 
 #include <sys/types.h>
-#include <privilege-control.h>
+#include <security-server-perm-types.h>
+#include <security-server-error.h>
 
 /**
  * @file    security-server.h
@@ -59,127 +60,9 @@
  *    </tt>
  */
 
-/**
- * \name Return Codes
- * exported by the foundation API.
- * result codes begin with the start error code and extend into negative direction.
- * @{
-*/
-#define SECURITY_SERVER_API_SUCCESS 0
-/*! \brief   indicating the result of the one specific API is successful */
-#define SECURITY_SERVER_API_ERROR_SOCKET -1
-
-/*! \brief   indicating the socket between client and Security Server has been failed  */
-#define SECURITY_SERVER_API_ERROR_BAD_REQUEST -2
-
-/*! \brief   indicating the response from Security Server is malformed */
-#define SECURITY_SERVER_API_ERROR_BAD_RESPONSE -3
-
-/*! \brief   indicating the transmitting request has been failed */
-/* deprecated unused */
-#define SECURITY_SERVER_API_ERROR_SEND_FAILED -4
-
-/*! \brief   indicating the receiving response has been failed */
-/* deprecated unused */
-#define SECURITY_SERVER_API_ERROR_RECV_FAILED -5
-
-/*! \brief   indicating requesting object is not exist */
-#define SECURITY_SERVER_API_ERROR_NO_SUCH_OBJECT -6
-
-/*! \brief   indicating the authentication between client and server has been failed */
-#define SECURITY_SERVER_API_ERROR_AUTHENTICATION_FAILED -7
-
-/*! \brief   indicating the API's input parameter is malformed */
-#define SECURITY_SERVER_API_ERROR_INPUT_PARAM -8
-
-/*! \brief   indicating the output buffer size which is passed as parameter is too small */
-#define SECURITY_SERVER_API_ERROR_BUFFER_TOO_SMALL -9
-
-/*! \brief   indicating system  is running out of memory state */
-#define SECURITY_SERVER_API_ERROR_OUT_OF_MEMORY -10
-
-/*! \brief   indicating the access has been denied by Security Server */
-#define SECURITY_SERVER_API_ERROR_ACCESS_DENIED -11
-
-/*! \brief   indicating Security Server has been failed for some reason */
-#define SECURITY_SERVER_API_ERROR_SERVER_ERROR -12
-
-/*! \brief   indicating given cookie is not exist in the database  */
-#define SECURITY_SERVER_API_ERROR_NO_SUCH_COOKIE -13
-
-/*! \brief   indicating there is no phone password set  */
-#define SECURITY_SERVER_API_ERROR_NO_PASSWORD -14
-
-/*! \brief   indicating password exists in system  */
-#define SECURITY_SERVER_API_ERROR_PASSWORD_EXIST -15
-
-/*! \brief   indicating password mismatch  */
-#define SECURITY_SERVER_API_ERROR_PASSWORD_MISMATCH -16
-
-/*! \brief   indicating password retry timeout is not occurred yet  */
-#define SECURITY_SERVER_API_ERROR_PASSWORD_RETRY_TIMER -17
-
-/*! \brief   indicating password retry timeout is not occurred yet  */
-#define SECURITY_SERVER_API_ERROR_PASSWORD_MAX_ATTEMPTS_EXCEEDED -18
-
-/*! \brief   indicating password retry timeout is not occurred yet  */
-#define SECURITY_SERVER_API_ERROR_PASSWORD_EXPIRED -19
-
-/*! \brief   indicating password retry timeout is not occurred yet  */
-#define SECURITY_SERVER_API_ERROR_PASSWORD_REUSED -20
-
-/*! \brief   indicating getting smack label from socket failed  */
-#define SECURITY_SERVER_API_ERROR_GETTING_SOCKET_LABEL_FAILED -21
-
-/*! \brief   indicating getting smack label from file failed  */
-#define SECURITY_SERVER_API_ERROR_GETTING_FILE_LABEL_FAILED -22
-
-/*! \brief   indicating setting smack label for file failed  */
-#define SECURITY_SERVER_API_ERROR_SETTING_FILE_LABEL_FAILED -23
-
-/*! \brief   indicating file already exists  */
-#define SECURITY_SERVER_API_ERROR_FILE_EXIST -24
-
-/*! \brief   indicating file does not exist  */
-#define SECURITY_SERVER_API_ERROR_FILE_NOT_EXIST -25
-
-/*! \brief   indicating file open error  */
-#define SECURITY_SERVER_API_ERROR_FILE_OPEN_FAILED -26
-
-/*! \brief   indicating file creation error  */
-#define SECURITY_SERVER_API_ERROR_FILE_CREATION_FAILED -27
-
-/*! \brief   indicating file deletion error  */
-#define SECURITY_SERVER_API_ERROR_FILE_DELETION_FAILED -28
-
-/*! \brief   inticating that password plugin reject request */
-#define SECURITY_SERVER_API_ERROR_PASSWORD_PLUGIN -29
-
-/*! \brief   indicating directory for file creation error  */
-#define SECURITY_SERVER_API_ERROR_DIRECTORY_CREATION_FAILED -30
-
-/*! \brief   indicating adding watch to file error  */
-#define SECURITY_SERVER_API_ERROR_WATCH_ADD_TO_FILE_FAILED -31
-
-/*! \brief   indicating computing directory size error  */
-#define SECURITY_SERVER_API_ERROR_QUOTA_STAT_FAILED -32
-
-/*! \brief   indicating too many files present for label  */
-#define SECURITY_SERVER_API_ERROR_QUOTA_NUM_FILES -33
-
-/*! \brief   indicating too many bytes consumed for label  */
-#define SECURITY_SERVER_API_ERROR_QUOTA_BYTES -34
-
-/*! \brief   indicating the error with unknown reason */
-#define SECURITY_SERVER_API_ERROR_UNKNOWN -255
-/** @}*/
-
-
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-
 
 /**
  * \par Description:
@@ -576,6 +459,42 @@ int security_server_is_pwd_valid(unsigned int *current_attempts,
 
 /**
  * \par Description:
+ * This API checks if password was used before.
+ *
+ * \par Purpose:
+ * This API should be used by applications which need to check if password would be rejected as used before.
+ *
+ * \par Typical use case:
+ * App to change password could check if newly created password was used before.
+ *
+ * \par Method of function operation:
+ * Sends a check request to security server and security server replies with password reusability information.
+ *
+ * \par Sync (or) Async:
+ * This is a Synchronous API.
+ *
+ * \par Important notes:
+ * Security-aware clients should check current password before calling this function.
+ *
+ * \param[in] pwd A password to be checked
+ * \param[out] is_reused Indicates if password was used before (non-zero value means, the password
+ *                       was used before)
+ *
+ * \return SECURITY_SERVER_API_SUCCESS if function call was successful. Error code otherwise.
+ *
+ * \par Known issues/bugs:
+ * None
+ *
+ * \pre None
+ *
+ * \post None
+ *
+ * Access to this function requires SMACK rule: "<app_label> security-server::api-password-set w
+*/
+int security_server_is_pwd_reused(const char *pwd, int *is_reused);
+
+/**
+ * \par Description:
  * This API sets phone password only if current password matches.
  *
  * \par Purpose:
@@ -717,7 +636,6 @@ int security_server_set_pwd(const char *cur_pwd,
  * Access to this function requires SMACK rule: "<app_label> security-server::api-password-set w"
  */
 int security_server_set_pwd_validity(const unsigned int valid_period_in_days);
-
 
 /**
  * \par Description:
@@ -1118,6 +1036,21 @@ int security_server_app_caller_has_privilege(app_type_t app_type,
 int security_server_get_gid_by_cookie(const char *cookie, gid_t *gid);
 
 /*
+ * This function allows middleware to get zone assigned to cookie
+ *
+ * \param[in] Cookie
+ * \param[out] Handler to store zone
+ *
+ * \return SECURITY_SERVER_API_SUCCESS on success or error code on fail
+ *
+ * \par For free zone use free(), zone allocated by strdup().
+ *      User responsibility is to free resource.
+ *
+ * Access to this function requires SMACK rule: "<app_label> security-server::api-cookie-check w"
+ */
+int security_server_get_zone_by_cookie(const char *cookie, char **zone);
+
+/*
  * This function allows to create, if doesn't exist, or open existing file by
  * Security Server on behalf of calling process in secured directory.
  *
@@ -1212,6 +1145,70 @@ int security_server_shared_file_reopen(const char *filename, int *fd);
  * Client must have the same SMACK label as process which created the file or the same SMACK label as the file.
  */
 int security_server_shared_file_delete(const char *filename);
+
+
+/*
+ * This function sets ACCESS label on a given path.
+ * @note 1: label is set on given path - if it is a directory, will be set only on the
+ * directory entry, not on its contents (non-recursive).
+ * @note 2: only clients having labels specified in /opt/data/security-server/label-whitelist
+ * can manipulate the ACCESS label.
+ * @note 3: files labeled with a label specified in /opt/data/security-server/label-blacklist
+ * can not be relabeled
+ * @note 4: ACCESS label can not take value specified in /opt/data/security-server/label-blacklist.
+ *
+ * \param[in] path          full path of file to set ACCESS label on.
+ * \param[in] new_label     label to set
+ *
+ * \return SECURITY_SERVER_API_SUCCESS on success or one of error codes on fail
+ * \return SECURITY_SERVER_API_ERROR_ACCESS_DENIED
+ * \return SECURITY_SERVER_API_ERROR_SOCKET
+ * \return SECURITY_SERVER_API_ERROR_INPUT_PARAM
+ * \return SECURITY_SERVER_API_ERROR_GETTING_FILE_LABEL_FAILED
+ * \return SECURITY_SERVER_API_ERROR_SETTING_ACCESS_LABEL_FAILED
+ * \return SECURITY_SERVER_API_ERROR_LABEL_NOT_ON_WHITE_LIST
+ * \return SECURITY_SERVER_API_ERROR_LABEL_ON_BLACK_LIST
+ *
+ * Access to this function requires SMACK rule: "<app_label> security-server::label w"
+ */
+int security_server_label_access(const char *path, const char *new_label);
+
+/*
+ * This function sets TRANSMUTE flag on given path.
+ * @note 1: path is a directory. Providing file will result in an error.
+ * @note 2: directories labeled with a label specified in /opt/data/security-server/label-blacklist
+ * can not have TRANSMUTE flag modified.
+ * @note 3: only clients having labels specified in /opt/data/security-server/label-whitelist
+ * can manipulate the TRANSMUTE flag.
+ *
+ * \param[in] path          full path of file/directory to set TRANSMUTE flag on.
+ * \param[in] transmute     new flag value (0 or 1)
+ *
+ * \return SECURITY_SERVER_API_SUCCESS on success or one of error codes on fail
+ * \return SECURITY_SERVER_API_ERROR_ACCESS_DENIED
+ * \return SECURITY_SERVER_API_ERROR_SOCKET
+ * \return SECURITY_SERVER_API_ERROR_INPUT_PARAM
+ * \return SECURITY_SERVER_API_ERROR_GETTING_FILE_LABEL_FAILED
+ * \return SECURITY_SERVER_API_ERROR_SETTING_TRANSMUTE_FLAG_FAILED
+ * \return SECURITY_SERVER_API_ERROR_LABEL_NOT_ON_WHITE_LIST
+ * \return SECURITY_SERVER_API_ERROR_LABEL_ON_BLACK_LIST
+ *
+ * Access to this function requires SMACK rule: "<app_label> security-server::label w"
+ */
+int security_server_label_transmute(const char *path, int transmute);
+
+/*
+ * This function checkes given name is exist in domain list or not.
+ * 
+ * \param[in] name	the value which be checked
+ *
+ * \return SECURITY_SERVER_API_SUCCESS on success or one of error codes on fail
+ * \return SECURITY_SERVER_API_ERROR_INPUT_PARAM
+ * \return SECURITY_SERVER_API_ERROR_FILE_OPEN_FAILED
+ * \return SECURITY_SERVER_API_ERROR_NOT_EXIST_IN_DOMAIN_LIST
+ *
+ */
+int security_server_check_domain_name(const char *name);
 
 #ifdef __cplusplus
 }

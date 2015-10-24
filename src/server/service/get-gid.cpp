@@ -33,13 +33,21 @@
 #include <error-description.h>
 #include <protocols.h>
 #include <get-gid.h>
-#include <security-server.h>
+#include <security-server-error.h>
 
 namespace SecurityServer {
 
 GenericSocketService::ServiceDescriptionVector GetGidService::GetServiceDescription() {
     return ServiceDescriptionVector
         {{SERVICE_SOCKET_GET_GID, "security-server::api-get-gid"}};
+}
+
+void GetGidService::Start() {
+    Create();
+}
+
+void GetGidService::Stop() {
+    Join();
 }
 
 void GetGidService::accept(const AcceptEvent &event) {

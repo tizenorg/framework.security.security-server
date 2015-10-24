@@ -35,7 +35,7 @@
 
 #include <protocols.h>
 
-#include <security-server.h>
+#include <security-server-error.h>
 
 namespace {
     bool calculateExpiredTime(unsigned int receivedDays, time_t &validSecs)
@@ -60,16 +60,43 @@ namespace {
 
 namespace SecurityServer
 {
-    int PasswordManager::isPwdValid(unsigned int &currentAttempt, unsigned int &maxAttempt,
-                                    unsigned int &expirationTime) const
+    void PasswordManager::addPassword(const std::string &zone)
     {
-        if (!m_pwdFile.isPasswordActive()) {
+        m_pwdFile.insert(PasswordFileMap::value_type(zone, PasswordFile(zone)));
+    }
+
+    void PasswordManager::removePassword(const std::string &zone)
+    {
+        m_pwdFile.erase(zone);
+    }
+
+    void PasswordManager::existPassword(const std::string &zone)
+    {
+        PasswordFileMap::iterator itPwd = m_pwdFile.find(zone);
+
+        if (itPwd != m_pwdFile.end()) {
+            if (!itPwd->second.checkDataDir())
+                removePassword(zone);
+            else
+                return;
+        }
+        addPassword(zone);
+        return;
+    }
+
+    int PasswordManager::isPwdValid(const std::string &zone, unsigned int &currentAttempt,
+                                    unsigned int &maxAttempt, unsigned int &expirationTime)
+    {
+        existPassword(zone);
+        PasswordFileMap::iterator itPwd = m_pwdFile.find(zone);
+
+        if (!itPwd->second.isPasswordActive()) {
             LogError("Current password not active.");
             return SECURITY_SERVER_API_ERROR_NO_PASSWORD;
         } else {
-            currentAttempt = m_pwdFile.getAttempt();
-            maxAttempt = m_pwdFile.getMaxAttempt();
-            expirationTime = m_pwdFile.getExpireTimeLeft();
+            currentAttempt = itPwd->second.getAttempt();
+            maxAttempt = itPwd->second.getMaxAttempt();
+            expirationTime = itPwd->second.getExpireTimeLeft();
 
             return SECURITY_SERVER_API_ERROR_PASSWORD_EXIST;
         }
@@ -77,44 +104,65 @@ namespace SecurityServer
         return SECURITY_SERVER_API_SUCCESS;
     }
 
-    int PasswordManager::checkPassword(const std::string &challenge, unsigned int &currentAttempt,
-                                       unsigned int &maxAttempt, unsigned int &expirationTime)
+    int PasswordManager::isPwdReused(const std::string &zone,
+                                     const std::string &pwd,
+                                     bool &isReused)
+    {
+        existPassword(zone);
+        PasswordFileMap::iterator itPwd = m_pwdFile.find(zone);
+
+        isReused = false;
+
+        // check history, however only if history is active and password is not empty
+        if (itPwd->second.isHistoryActive() && !pwd.empty()) {
+            isReused = itPwd->second.isPasswordReused(pwd);
+        }
+
+        return SECURITY_SERVER_API_SUCCESS;
+    }
+
+    int PasswordManager::checkPassword(const std::string &zone, const std::string &challenge,
+                                       unsigned int &currentAttempt, unsigned int &maxAttempt,
+                                       unsigned int &expirationTime)
     {
         LogSecureDebug("Inside checkPassword function.");
 
-        if (m_pwdFile.isIgnorePeriod()) {
+        existPassword(zone);
+        PasswordFileMap::iterator itPwd = m_pwdFile.find(zone);
+
+        if (itPwd->second.isIgnorePeriod()) {
             LogError("Retry timeout occurred.");
             return SECURITY_SERVER_API_ERROR_PASSWORD_RETRY_TIMER;
         }
 
-        if (!m_pwdFile.isPasswordActive() && !challenge.empty()) {
+        if (!itPwd->second.isPasswordActive() && !challenge.empty()) {
             LogError("Password not active.");
             return SECURITY_SERVER_API_ERROR_NO_PASSWORD;
         }
 
-        m_pwdFile.incrementAttempt();
-        m_pwdFile.writeAttemptToFile();
+        itPwd->second.incrementAttempt();
+        itPwd->second.writeAttemptToFile();
 
-        currentAttempt = m_pwdFile.getAttempt();
-        maxAttempt = m_pwdFile.getMaxAttempt();
-        expirationTime = m_pwdFile.getExpireTimeLeft();
+        currentAttempt = itPwd->second.getAttempt();
+        maxAttempt = itPwd->second.getMaxAttempt();
+        expirationTime = itPwd->second.getExpireTimeLeft();
 
-        if (m_pwdFile.checkIfAttemptsExceeded()) {
+        if (itPwd->second.checkIfAttemptsExceeded()) {
             LogError("Too many tries.");
             return SECURITY_SERVER_API_ERROR_PASSWORD_MAX_ATTEMPTS_EXCEEDED;
         }
 
-        if (!m_pwdFile.checkPassword(challenge)) {
+        if (!itPwd->second.checkPassword(challenge)) {
             LogError("Wrong password.");
             return SECURITY_SERVER_API_ERROR_PASSWORD_MISMATCH;
         }
 
         // Password maches and attempt number is fine - time to reset counter.
-        m_pwdFile.resetAttempt();
-        m_pwdFile.writeAttemptToFile();
+        itPwd->second.resetAttempt();
+        itPwd->second.writeAttemptToFile();
 
         // Password is too old. You must change it before login.
-        if (m_pwdFile.checkExpiration()) {
+        if (itPwd->second.checkExpiration()) {
             LogError("Password expired.");
             return SECURITY_SERVER_API_ERROR_PASSWORD_EXPIRED;
         }
@@ -122,18 +170,23 @@ namespace SecurityServer
         return SECURITY_SERVER_API_SUCCESS;
     }
 
-    int PasswordManager::setPassword(const std::string &currentPassword,
+    int PasswordManager::setPassword(const std::string &zone,
+                                     const std::string &currentPassword,
                                      const std::string &newPassword,
                                      const unsigned int receivedAttempts,
                                      const unsigned int receivedDays,
                                      PluginHandler &plugin)
     {
-        LogSecureDebug("Curpwd = " << currentPassword << ", newpwd = " << newPassword <<
-                       ", recatt = " << receivedAttempts << ", recdays = " << receivedDays);
+        LogSecureDebug("Zone = " << zone << ", curpwd = " << currentPassword <<
+                       ", newpwd = " << newPassword << ", recatt = " << receivedAttempts <<
+                       ", recdays = " << receivedDays);
 
         time_t valid_secs = 0;
 
-        if (m_pwdFile.isIgnorePeriod()) {
+        existPassword(zone);
+        PasswordFileMap::iterator itPwd = m_pwdFile.find(zone);
+
+        if (itPwd->second.isIgnorePeriod()) {
             LogError("Retry timeout occured.");
             return SECURITY_SERVER_API_ERROR_PASSWORD_RETRY_TIMER;
         }
@@ -157,32 +210,32 @@ namespace SecurityServer
 
         // check delivered currentPassword
         // when m_passwordActive flag is false, current password should be empty
-        if (!currentPassword.empty() && !m_pwdFile.isPasswordActive()) {
+        if (!currentPassword.empty() && !itPwd->second.isPasswordActive()) {
             LogError("Password not active.");
             return SECURITY_SERVER_API_ERROR_NO_PASSWORD;
         }
 
         //increment attempt count before checking it against max attempt count
-        m_pwdFile.incrementAttempt();
-        m_pwdFile.writeAttemptToFile();
+        itPwd->second.incrementAttempt();
+        itPwd->second.writeAttemptToFile();
 
-        if (m_pwdFile.checkIfAttemptsExceeded()) {
+        if (itPwd->second.checkIfAttemptsExceeded()) {
             LogError("Too many tries.");
             return SECURITY_SERVER_API_ERROR_PASSWORD_MAX_ATTEMPTS_EXCEEDED;
         }
 
-        if (!m_pwdFile.checkPassword(currentPassword)) {
+        if (!itPwd->second.checkPassword(currentPassword)) {
             LogError("Wrong password.");
             return SECURITY_SERVER_API_ERROR_PASSWORD_MISMATCH;
         }
 
         //here we are sure that user knows current password - we can reset attempt counter
-        m_pwdFile.resetAttempt();
-        m_pwdFile.writeAttemptToFile();
+        itPwd->second.resetAttempt();
+        itPwd->second.writeAttemptToFile();
 
         // check history, however only if history is active and new password is not empty
-        if (m_pwdFile.isHistoryActive() && !newPassword.empty()) {
-            if (m_pwdFile.isPasswordReused(newPassword)) {
+        if (itPwd->second.isHistoryActive() && !newPassword.empty()) {
+            if (itPwd->second.isPasswordReused(newPassword)) {
                 LogError("Password reused.");
                 return SECURITY_SERVER_API_ERROR_PASSWORD_REUSED;
             }
@@ -193,20 +246,20 @@ namespace SecurityServer
             return SECURITY_SERVER_API_ERROR_INPUT_PARAM;
         }
 
-        if (SECURITY_SERVER_PLUGIN_SUCCESS != plugin.changeUserPassword(APP_USER, currentPassword, newPassword))
+        if (SECURITY_SERVER_PLUGIN_SUCCESS != plugin.changeUserPassword(zone, APP_USER, currentPassword, newPassword))
         {
             LogError("Plugin reject password change!");
             return SECURITY_SERVER_API_ERROR_PASSWORD_PLUGIN;
         }
 
         //setting password
-        m_pwdFile.setPassword(newPassword);
-        m_pwdFile.setMaxAttempt(receivedAttempts);
-        m_pwdFile.setExpireTime(valid_secs);
-        m_pwdFile.writeMemoryToFile();
+        itPwd->second.setPassword(newPassword);
+        itPwd->second.setMaxAttempt(receivedAttempts);
+        itPwd->second.setExpireTime(valid_secs);
+        itPwd->second.writeMemoryToFile();
 
         // unlockUserKey is treated as confirmation of new password by CKM (CKM will remove backup).
-        if (SECURITY_SERVER_PLUGIN_SUCCESS != plugin.login(APP_USER, newPassword)) {
+        if (SECURITY_SERVER_PLUGIN_SUCCESS != plugin.login(zone, APP_USER, newPassword)) {
             // It's not critical. We may confirm new password next time user login.
             LogDebug("Confirmation failed!");
         }
@@ -214,32 +267,40 @@ namespace SecurityServer
         return SECURITY_SERVER_API_SUCCESS;
     }
 
-    int PasswordManager::setPasswordValidity(const unsigned int receivedDays)
+    int PasswordManager::setPasswordValidity(const std::string &zone,
+                                             const unsigned int receivedDays)
     {
         time_t valid_secs = 0;
 
         LogSecureDebug("received_days: " << receivedDays);
 
-        if (!m_pwdFile.isPasswordActive()) {
+        existPassword(zone);
+        PasswordFileMap::iterator itPwd = m_pwdFile.find(zone);
+
+        if (!itPwd->second.isPasswordActive()) {
             LogError("Current password is not active.");
             return SECURITY_SERVER_API_ERROR_NO_PASSWORD;
         }
 
-        if(!calculateExpiredTime(receivedDays, valid_secs))
+        if (!calculateExpiredTime(receivedDays, valid_secs))
             return SECURITY_SERVER_API_ERROR_INPUT_PARAM;
 
-        m_pwdFile.setExpireTime(valid_secs);
-        m_pwdFile.writeMemoryToFile();
+        itPwd->second.setExpireTime(valid_secs);
+        itPwd->second.writeMemoryToFile();
 
         return SECURITY_SERVER_API_SUCCESS;
     }
 
-    int PasswordManager::resetPassword(const std::string &newPassword,
+    int PasswordManager::resetPassword(const std::string &zone,
+                                       const std::string &newPassword,
                                        const unsigned int receivedAttempts,
                                        const unsigned int receivedDays,
                                        PluginHandler &plugin)
     {
         time_t valid_secs = 0;
+
+        existPassword(zone);
+        PasswordFileMap::iterator itPwd = m_pwdFile.find(zone);
 
         if (!calculateExpiredTime(receivedDays, valid_secs))
             return SECURITY_SERVER_API_ERROR_INPUT_PARAM;
@@ -249,21 +310,21 @@ namespace SecurityServer
             return SECURITY_SERVER_API_ERROR_INPUT_PARAM;
         }
 
-        if (SECURITY_SERVER_PLUGIN_SUCCESS != plugin.resetUserPassword(APP_USER, newPassword)) {
+        if (SECURITY_SERVER_PLUGIN_SUCCESS != plugin.resetUserPassword(zone, APP_USER, newPassword)) {
             LogError("Password reset was rejected by plugin");
             return SECURITY_SERVER_API_ERROR_PASSWORD_PLUGIN;
         }
 
-        m_pwdFile.setPassword(newPassword);
-        m_pwdFile.setMaxAttempt(receivedAttempts);
-        m_pwdFile.setExpireTime(valid_secs);
-        m_pwdFile.writeMemoryToFile();
+        itPwd->second.setPassword(newPassword);
+        itPwd->second.setMaxAttempt(receivedAttempts);
+        itPwd->second.setExpireTime(valid_secs);
+        itPwd->second.writeMemoryToFile();
 
-        m_pwdFile.resetAttempt();
-        m_pwdFile.writeAttemptToFile();
+        itPwd->second.resetAttempt();
+        itPwd->second.writeAttemptToFile();
 
         // unlockUserKey is treated as confirmation of new password by CKM (CKM will remove backup).
-        if (SECURITY_SERVER_PLUGIN_SUCCESS != plugin.login(APP_USER, newPassword)) {
+        if (SECURITY_SERVER_PLUGIN_SUCCESS != plugin.login(zone, APP_USER, newPassword)) {
             // It's not critical. We may confirm new password next time user login.
             LogDebug("Confirmation failed!");
         }
@@ -271,32 +332,39 @@ namespace SecurityServer
         return SECURITY_SERVER_API_SUCCESS;
     }
 
-    int PasswordManager::setPasswordHistory(const unsigned int history)
+    int PasswordManager::setPasswordHistory(const std::string &zone, const unsigned int history)
     {
-        if(history > MAX_PASSWORD_HISTORY) {
+        existPassword(zone);
+        PasswordFileMap::iterator itPwd = m_pwdFile.find(zone);
+
+        if (history > MAX_PASSWORD_HISTORY) {
             LogError("Incorrect input param.");
             return SECURITY_SERVER_API_ERROR_INPUT_PARAM;
         }
 
-        m_pwdFile.setMaxHistorySize(history);
-        m_pwdFile.writeMemoryToFile();
+        itPwd->second.setMaxHistorySize(history);
+        itPwd->second.writeMemoryToFile();
 
         return SECURITY_SERVER_API_SUCCESS;
     }
 
-    int PasswordManager::setPasswordMaxChallenge(const unsigned int maxChallenge)
+    int PasswordManager::setPasswordMaxChallenge(const std::string &zone,
+                                                 const unsigned int maxChallenge)
     {
+        existPassword(zone);
+        PasswordFileMap::iterator itPwd = m_pwdFile.find(zone);
+
         // check if there is password
-        if (!m_pwdFile.isPasswordActive()) {
+        if (!itPwd->second.isPasswordActive()) {
             LogError("Password not active.");
             return SECURITY_SERVER_API_ERROR_NO_PASSWORD;
         }
 
-        m_pwdFile.setMaxAttempt(maxChallenge);
-        m_pwdFile.writeMemoryToFile();
+        itPwd->second.setMaxAttempt(maxChallenge);
+        itPwd->second.writeMemoryToFile();
 
-        m_pwdFile.resetAttempt();
-        m_pwdFile.writeAttemptToFile();
+        itPwd->second.resetAttempt();
+        itPwd->second.writeAttemptToFile();
 
         return SECURITY_SERVER_API_SUCCESS;
     }

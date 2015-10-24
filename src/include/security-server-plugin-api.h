@@ -27,11 +27,12 @@
 namespace SecurityServer {
 
 struct PasswordPlugin {
-    virtual int changeUserPassword(uid_t user, const std::string &oldPass, const std::string &newPass) = 0;
-    virtual int login(uid_t user, const std::string &password) = 0;
-    virtual int logout(uid_t user) = 0;
-    virtual int resetUserPassword(uid_t user, const std::string &newPass) = 0;
-    virtual int removeUserData(uid_t user) = 0;
+    virtual int changeUserPassword(const std::string &zone, uid_t user, const std::string &oldPass,
+                                   const std::string &newPass) = 0;
+    virtual int login(const std::string &zone, uid_t user, const std::string &password) = 0;
+    virtual int logout(const std::string &zone, uid_t user) = 0;
+    virtual int resetUserPassword(const std::string &zone, uid_t user, const std::string &newPass) = 0;
+    virtual int removeUserData(const std::string &zone, uid_t user) = 0;
     virtual ~PasswordPlugin(){}
 };
 

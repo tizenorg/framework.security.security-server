@@ -31,6 +31,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <smack-check.h>
+#include <zone-check.h>
 #include <privilege-control.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -97,7 +98,7 @@ const Cookie * CookieJar::GenerateCookie(int pid)
     //get smack label if smack enabled
     if (smack_check()) {
         char label[SMACK_LABEL_LEN + 1];
-        retval = get_smack_label_from_process(pid, label);
+        retval = ss_get_smack_label_from_process(pid, label);
         if (retval != PC_OPERATION_SUCCESS) {
             LogDebug("Unable to get smack label of process");
             return NULL;
@@ -132,12 +133,18 @@ const Cookie * CookieJar::GenerateCookie(int pid)
         }
     }
 
+    //get zone name
+    std::string zoneName;
+    lookup_zone_by_pid(pid, zoneName);
+    newCookie.zone = zoneName;
+
     //DEBUG ONLY
     //print info about cookie
     LogDebug("Cookie created");
     LogDebug("PID: " << newCookie.pid);
     LogDebug("UID: " << newCookie.uid);
     LogDebug("GID: " << newCookie.gid);
+    LogDebug("ZONE: " << newCookie.zone);
     LogDebug("PATH: " << newCookie.binaryPath);
     LogDebug("LABEL: " << newCookie.smackLabel);
     for (size_t k = 0; k < newCookie.permissions.size(); k++)
@@ -219,6 +226,9 @@ bool CookieJar::CompareCookies(const Cookie &c1, const Cookie &c2, CompareType c
 
     case CompareType::GID:
         return (c1.gid == c2.gid);
+
+    case CompareType::ZONE:
+        return (c1.zone == c2.zone);
 
     default:
         LogDebug("Wrong function parameters");

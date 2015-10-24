@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2000 - 2013 Samsung Electronics Co., Ltd All Rights Reserved
+ *  Copyright (c) 2000 - 2015 Samsung Electronics Co., Ltd All Rights Reserved
  *
  *  Contact: Bumjin Im <bj.im@samsung.com>
  *
@@ -26,6 +26,8 @@
 #ifndef _SECURITY_SERVER_CLIENT_
 #define _SECURITY_SERVER_CLIENT_
 
+#include <unistd.h>
+
 #include <vector>
 #include <functional>
 
@@ -40,6 +42,8 @@ extern "C" {
 namespace SecurityServer {
 
 typedef std::vector<unsigned char> RawBuffer;
+
+int sendToServerWithFd(int fd, const RawBuffer &send, MessageBuffer &recv);
 
 int sendToServer(char const * const interface, const RawBuffer &send, MessageBuffer &recv);
 
@@ -59,6 +63,27 @@ int sendToServerAncData(char const * const interface, const RawBuffer &send, str
  */
 int try_catch(const std::function<int()>& func);
 
+
+class SockRAII {
+public:
+    SockRAII()
+      : m_sock(-1)
+    {}
+
+    ~SockRAII() {
+        if (m_sock > -1 )
+            close(m_sock);
+    }
+
+    int Connect(char const * const interface);
+
+    int Get() const {
+        return m_sock;
+    }
+
+private:
+    int m_sock;
+};
 } // namespace SecuritySever
 
 #endif // _SECURITY_SERVER_CLIENT_
