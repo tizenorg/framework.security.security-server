@@ -302,7 +302,7 @@ int security_server_perm_app_get_permissions(ss_transaction *transaction,
  *
  * This function should be called during application installation. Results will
  * be persistent on the file system. It must be called within database transaction
- * started with security_server_perm_begin() and finished with security_server_perm_commit().
+ * started with security_server_perm_begin() and finished with security_server_perm_end().
  *
  * \param[in] transaction Security server permission transaction
  * \param[in] pkg_id application identifier
@@ -391,7 +391,7 @@ int security_server_perm_app_add_friend(ss_transaction *transaction,
 /**
  * Adds new permission (api feature) to the database.
  * It must be called within database transaction started with
- * security_server_perm_begin() and finished with security_server_perm_commit().
+ * security_server_perm_begin() and finished with security_server_perm_end().
  *
  * \param[in] transaction Security server permission transaction
  * \param[in] app_type application type

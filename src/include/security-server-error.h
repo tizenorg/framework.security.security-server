@@ -184,15 +184,6 @@
 /*! \brief   indicating getting smack label failed */
 #define SECURITY_SERVER_API_ERROR_GETTING_LABEL -51
 
-/*! \brief   indicating that not exist in domain list */
-#define SECURITY_SERVER_API_ERROR_NOT_EXIST_IN_DOMAIN_LIST -52
-
-/*! \brief   indicating link creation failed */
-#define SECURITY_SERVER_API_ERROR_LINK_CREATION_FAILED -53
-
-/*! \brief   indicating link deletion failed */
-#define SECURITY_SERVER_API_ERROR_LINK_DELETION_FAILED -54
-
 /*! \brief   indicating the error with unknown reason */
 #define SECURITY_SERVER_API_ERROR_UNKNOWN -255
 /** @}*/

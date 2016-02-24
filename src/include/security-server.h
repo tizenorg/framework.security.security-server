@@ -1197,19 +1197,6 @@ int security_server_label_access(const char *path, const char *new_label);
  */
 int security_server_label_transmute(const char *path, int transmute);
 
-/*
- * This function checkes given name is exist in domain list or not.
- * 
- * \param[in] name	the value which be checked
- *
- * \return SECURITY_SERVER_API_SUCCESS on success or one of error codes on fail
- * \return SECURITY_SERVER_API_ERROR_INPUT_PARAM
- * \return SECURITY_SERVER_API_ERROR_FILE_OPEN_FAILED
- * \return SECURITY_SERVER_API_ERROR_NOT_EXIST_IN_DOMAIN_LIST
- *
- */
-int security_server_check_domain_name(const char *name);
-
 #ifdef __cplusplus
 }
 #endif

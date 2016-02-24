@@ -81,7 +81,6 @@ SET(SECURITY_CLIENT_SOURCES
     ${SERVER2_PATH}/client/client-open-for.cpp
     ${SERVER2_PATH}/client/client-password.cpp
     ${SERVER2_PATH}/client/client-label.cpp
-    ${SERVER2_PATH}/client/client-domain.cpp
     )
 
 ADD_LIBRARY(${TARGET_SECURITY_CLIENT} SHARED ${SECURITY_CLIENT_SOURCES})
