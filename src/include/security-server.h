@@ -170,6 +170,12 @@
 /*! \brief   indicating too many bytes consumed for label  */
 #define SECURITY_SERVER_API_ERROR_QUOTA_BYTES -34
 
+/*! \brief   indicating link creation failed */
+#define SECURITY_SERVER_API_ERROR_LINK_CREATION_FAILED -53
+
+/*! \brief   indicating link deletion failed */
+#define SECURITY_SERVER_API_ERROR_LINK_DELETION_FAILED -54
+
 /*! \brief   indicating the error with unknown reason */
 #define SECURITY_SERVER_API_ERROR_UNKNOWN -255
 /** @}*/
